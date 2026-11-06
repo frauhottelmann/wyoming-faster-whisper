@@ -30,6 +30,10 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/frauhottelmann/wyoming-vulkan-whisper
+  # Outside the checkout on purpose: the push step sends the checkout to
+  # BuildKit as the build context, and it fails on any file there it cannot
+  # read (.dockerignore does not stop it from walking a directory).
+  DATA_DIR: ${{ github.workspace }}/../whisper-data
 
 jobs:
   build:
@@ -71,14 +75,17 @@ jobs:
       - name: Cache models
         uses: actions/cache@v4
         with:
-          path: data
+          path: ${{ env.DATA_DIR }}
           key: vulkan-models-base
 
       - name: Start container
         run: |
-          mkdir -p data
+          mkdir -p "$DATA_DIR"
+          # As the runner's user, so the files written to /data (the model,
+          # Mesa's shader cache) stay readable for the cache step.
           docker run -d --name whisper -p 10300:10300 \
-            -v "$PWD/data:/data" \
+            --user "$(id -u):$(id -g)" \
+            -v "$DATA_DIR:/data" \
             -e GGML_VK_VISIBLE_DEVICES=0 \
             wyoming-vulkan-whisper:test \
             --model base --language en --vad-clip
@@ -123,14 +130,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Runs on pull requests too, without pushing, so that a PR exercises the
+      # same step (and build context) that publishes from main.
       - name: Push
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.vulkan
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=vulkan
