@@ -130,6 +130,29 @@ def warn_if_no_onnx_gpu(device: str, providers: Sequence[str]) -> bool:
     return False
 
 
+def is_vulkan(device: str) -> bool:
+    """Report whether a device string names a Vulkan GPU ("vulkan", "vulkan:N").
+
+    Only whisper.cpp has a Vulkan backend; every other library treats the
+    string as unknown.
+    """
+    return device.strip().lower().startswith("vulkan")
+
+
+def whisper_cpp_gpu(device: str) -> Tuple[bool, int]:
+    """Return (use_gpu, gpu_device) for whisper.cpp.
+
+    whisper.cpp uses whichever GPU backend it was built with - Vulkan in the
+    Vulkan image, CUDA if someone builds it that way - so both "vulkan[:N]" and
+    "cuda[:N]" mean "use the GPU". Anything else runs on the CPU. A GPU build
+    with no usable device also falls back to the CPU, logging why.
+    """
+    if not (is_gpu(device) or is_vulkan(device)):
+        return False, 0
+
+    return True, device_index(device) or 0
+
+
 def resolve_compute_type(compute_type: str, device: str) -> str:
     """Pick the CTranslate2 compute type, filling in a GPU-appropriate default.
 

@@ -19,7 +19,7 @@ from .const import (
     base_language,
     sense_voice_language,
 )
-from .device import is_gpu, resolve_compute_type
+from .device import is_gpu, is_vulkan, resolve_compute_type
 from .faster_whisper_handler import FasterWhisperTranscriber
 from .languages import WHISPER_LANGUAGES
 
@@ -145,6 +145,7 @@ class ModelLoader:
             "has_funasr": _module_available("funasr"),
             "has_qwen3_asr": _module_available("onnxruntime")
             and _module_available("tokenizers"),
+            "has_whisper_cpp": _module_available("pywhispercpp"),
         }
         _LOGGER.debug("Backends available: %s", available)
 
@@ -170,6 +171,7 @@ class ModelLoader:
         if is_english_only_model(self.model) and self.resolve_stt_library() in (
             SttLibrary.FASTER_WHISPER,
             SttLibrary.TRANSFORMERS,
+            SttLibrary.WHISPER_CPP,
         ):
             return {"en"}
 
@@ -208,7 +210,7 @@ class ModelLoader:
                 language,
                 is_arm,
                 streaming=streaming,
-                gpu=is_gpu(self.device),
+                gpu=is_gpu(self.device) or is_vulkan(self.device),
             )
 
         _LOGGER.debug(
@@ -333,6 +335,19 @@ class ModelLoader:
                 device=self.device,
             )
 
+        if stt_library == SttLibrary.WHISPER_CPP:
+            from .whisper_cpp_handler import WhisperCppTranscriber  # noqa: F811
+
+            return WhisperCppTranscriber(
+                model,
+                cache_dir=self.download_dir,
+                local_files_only=local_files_only,
+                device=self.device,
+                cpu_threads=self.cpu_threads,
+                beam_size=self.beam_size,
+                task=self.whisper_task,
+            )
+
         if stt_library == SttLibrary.FUNASR:
             from .funasr_handler import FunASRTranscriber  # noqa: F811
 
@@ -440,7 +455,7 @@ def library_languages(
     if stt_library == SttLibrary.QWEN3_ASR:
         return QWEN3_ASR_LANGUAGES
 
-    # faster-whisper and transformers both run Whisper checkpoints. AUTO only
+    # faster-whisper, transformers, and whisper.cpp all run Whisper checkpoints. AUTO only
     # reaches here as a fallback, which is faster-whisper.
     return WHISPER_LANGUAGES
 
@@ -470,6 +485,7 @@ def guess_stt_library(
     has_onnx_asr: bool,
     has_funasr: bool,
     has_qwen3_asr: bool = False,
+    has_whisper_cpp: bool = False,
 ) -> SttLibrary:
     """Resolve which speech-to-text library to use.
 
@@ -512,6 +528,7 @@ def guess_stt_library(
         SttLibrary.ONNX_ASR: has_onnx_asr,
         SttLibrary.FUNASR: has_funasr,
         SttLibrary.QWEN3_ASR: has_qwen3_asr,
+        SttLibrary.WHISPER_CPP: has_whisper_cpp,
     }
     if not available.get(preferred_stt_library, True):
         _LOGGER.debug("Falling back to faster-whisper (missing dependencies)")
@@ -587,6 +604,19 @@ def guess_model(
 
     if stt_library == SttLibrary.FUNASR:
         return "FunAudioLLM/SenseVoiceSmall"
+
+    if stt_library == SttLibrary.WHISPER_CPP:
+        # whisper.cpp model names (ggerganov/whisper.cpp on HuggingFace). On a
+        # GPU, one size up from the CPU default, as for faster-whisper: small is
+        # where Whisper starts being accurate outside English, and even an iGPU
+        # runs it faster than the CPU runs base.
+        if gpu:
+            return "small"
+
+        if is_arm:
+            return "tiny"
+
+        return "base"
 
     # faster-whisper
     if gpu:

@@ -24,6 +24,9 @@ parser.add_argument(
 parser.add_argument(
     "--hass", action="store_true", help="Install Home Assistant requirements"
 )
+parser.add_argument(
+    "--whisper-cpp", action="store_true", help="Install whisper.cpp requirements"
+)
 args = parser.parse_args()
 
 # Create virtual environment
@@ -57,6 +60,9 @@ if args.qwen3_asr:
 
 if args.hass:
     extras.append("hass")
+
+if args.whisper_cpp:
+    extras.append("whisper_cpp")
 
 extras_str = ""
 if extras:

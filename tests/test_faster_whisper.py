@@ -39,6 +39,10 @@ def _needs(module: str):
         pytest.param(
             "sherpa", "auto", ["--sherpa-streaming"], marks=_needs("sherpa_onnx")
         ),
+        pytest.param("whisper-cpp", "base", [], marks=_needs("pywhispercpp")),
+        pytest.param(
+            "whisper-cpp", "base", ["--vad-clip"], marks=_needs("pywhispercpp")
+        ),
         pytest.param(
             "funasr", "FunAudioLLM/SenseVoiceSmall", [], marks=_needs("funasr")
         ),

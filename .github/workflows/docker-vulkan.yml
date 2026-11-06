@@ -1,0 +1,136 @@
+---
+# Builds Dockerfile.vulkan, checks that it transcribes through whisper.cpp's
+# Vulkan backend, and publishes it to the GitHub Container Registry:
+#
+#   pull request   build + smoke test, nothing pushed
+#   push to main   ghcr.io/frauhottelmann/wyoming-vulkan-whisper:main (+ sha-<commit>)
+#   release        :<version>, :<major>.<minor>, and :latest
+#
+# GitHub runners have no GPU, so the smoke test runs whisper.cpp's Vulkan
+# backend on Mesa's software rasterizer (lavapipe). ggml skips CPU-type Vulkan
+# devices unless GGML_VK_VISIBLE_DEVICES names one, which is set for the test
+# only. That proves the Vulkan build works end to end; it says nothing about
+# speed.
+name: Docker (Vulkan)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/frauhottelmann/wyoming-vulkan-whisper
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha,enable=${{ github.event_name == 'push' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=ref,event=pr
+
+      # Built once into the local image store for the smoke test; the push
+      # below reuses the same layers from the cache.
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.vulkan
+          platforms: linux/amd64
+          load: true
+          tags: wyoming-vulkan-whisper:test
+          cache-from: type=gha,scope=vulkan
+          cache-to: type=gha,mode=max,scope=vulkan
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: vulkan-models-base
+
+      - name: Start container
+        run: |
+          mkdir -p data
+          docker run -d --name whisper -p 10300:10300 \
+            -v "$PWD/data:/data" \
+            -e GGML_VK_VISIBLE_DEVICES=0 \
+            wyoming-vulkan-whisper:test \
+            --model base --language en --vad-clip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Smoke test
+        run: |
+          pip install 'wyoming>=1.10.2,<2'
+          python3 script/smoke_test --uri tcp://127.0.0.1:10300 \
+            --wav tests/turn_on_the_living_room_lamp.wav \
+            --expect "turn on the living room lamp"
+
+      # whisper.cpp falls back to the CPU silently when it finds no Vulkan
+      # device, which would make the smoke test pass for the wrong reason.
+      - name: Check that Vulkan was used
+        run: |
+          docker logs whisper 2>&1 | grep -E "ggml_vulkan|whisper_backend_init_gpu"
+          docker logs whisper 2>&1 | grep -q "using Vulkan0 backend"
+
+      - name: Check health
+        run: |
+          for i in $(seq 1 30); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' whisper)"
+            echo "health: $status"
+            [ "$status" = healthy ] && exit 0
+            sleep 5
+          done
+          exit 1
+
+      - name: Container log
+        if: always()
+        run: docker logs whisper 2>&1 | grep -v "unknown token" | tail -100 || true
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.vulkan
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=vulkan

@@ -1,0 +1,140 @@
+# Vulkan variant of the CPU image in ./Dockerfile, for GPUs that CUDA does not
+# reach: AMD (including APU iGPUs such as the Radeon Vega in Ryzen 5000G/7000
+# parts), Intel, and anything else with a Mesa Vulkan driver.
+#
+# Not published to Docker Hub - build it locally:
+#
+#   docker build -f Dockerfile.vulkan -t wyoming-whisper:vulkan .
+#
+# and run it with the GPU's render node passed through:
+#
+#   docker run -it -p 10300:10300 -v /path/to/data:/data \
+#       --device /dev/dri --group-add "$(getent group render | cut -d: -f3)" \
+#       wyoming-whisper:vulkan
+#
+# CTranslate2 (faster-whisper) has no Vulkan backend, so this image transcribes
+# with whisper.cpp instead, through the pywhispercpp bindings built from source
+# with GGML_VULKAN=1. The Wyoming server, its options, and Home Assistant name
+# biasing are the same as in the other images; only the default --stt-library
+# (whisper-cpp) and --device (vulkan) differ. faster-whisper is still installed
+# - the server imports it unconditionally - and runs on the CPU if you pass
+# --stt-library faster-whisper.
+#
+# The other optional backends (transformers, sherpa, onnx-asr, qwen3-asr) are
+# left out: none of them can use a Vulkan device, and torch alone would add
+# more than the rest of the image together. That keeps this image at roughly a
+# third of the CPU image's size, with no ROCm stack at all - the Mesa RADV
+# driver is a few tens of MB.
+#
+# Ubuntu 24.04 rather than the Debian base of the CPU image: its updates carry a
+# current Mesa (RADV 25.x), plus the glslc and SPIR-V headers that whisper.cpp's
+# Vulkan shaders are compiled with.
+
+# -----------------------------------------------------------------------------
+# Build stage: compile whisper.cpp (with the Vulkan backend) into a wheel.
+# -----------------------------------------------------------------------------
+FROM ubuntu:24.04 AS build
+
+ARG PYWHISPERCPP_VERSION=1.5.1
+
+# GGML_NATIVE=OFF keeps the CPU kernels portable instead of tuning them for the
+# machine that happens to build the image; AVX2/FMA/F16C cover every x86-64 CPU
+# from Haswell/Zen 1 on, and the CPU only does the work the GPU does not.
+# Override with --build-arg GGML_CPU_FLAGS="" on older hardware.
+ARG GGML_CPU_FLAGS="GGML_AVX=ON GGML_AVX2=ON GGML_FMA=ON GGML_F16C=ON"
+
+RUN \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        git \
+        glslc \
+        libvulkan-dev \
+        python3 \
+        python3-dev \
+        python3-pip \
+        python3-venv \
+        spirv-headers \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# pywhispercpp's setup.py forwards every environment variable to CMake as a
+# -D definition, which is how GGML_VULKAN (and the flags above) reach the
+# whisper.cpp build. --no-binary forces the source build: the PyPI wheels are
+# CPU-only.
+#
+# BUILD_SHARED_LIBS=OFF links whisper.cpp and ggml statically into the
+# extension module. Built shared, the wheel would carry its own libggml.so.0
+# without an RPATH to find it - and pysilero-vad, which the server imports at
+# startup, ships a different ggml release under that same soname. Whichever
+# loads first would be used by both, which is an ABI mismatch waiting to crash.
+RUN \
+    python3 -m venv /build/.venv \
+    && /build/.venv/bin/pip3 install --no-cache-dir -U pip setuptools wheel \
+    && if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+           for flag in ${GGML_CPU_FLAGS}; do export "${flag?}"; done; \
+       fi \
+    && GGML_VULKAN=1 GGML_NATIVE=OFF \
+        BUILD_SHARED_LIBS=OFF CMAKE_POSITION_INDEPENDENT_CODE=ON \
+        CMAKE_BUILD_PARALLEL_LEVEL="$(nproc)" \
+        /build/.venv/bin/pip3 wheel --no-cache-dir --no-deps \
+        --no-binary pywhispercpp \
+        -w /build/wheels \
+        "pywhispercpp==${PYWHISPERCPP_VERSION}"
+
+# -----------------------------------------------------------------------------
+# Runtime stage
+# -----------------------------------------------------------------------------
+FROM ubuntu:24.04
+
+WORKDIR /usr/src
+
+# libvulkan1 is the loader; mesa-vulkan-drivers provides RADV (AMD), ANV
+# (Intel), and the rest. libgomp1 is whisper.cpp's OpenMP runtime.
+COPY ./pyproject.toml ./
+COPY --from=build /build/wheels /tmp/wheels
+RUN \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgomp1 \
+        libvulkan1 \
+        mesa-vulkan-drivers \
+        python3 \
+        python3-pip \
+        python3-venv \
+    \
+    && python3 -m venv .venv \
+    && .venv/bin/pip3 install --no-cache-dir -U \
+        setuptools \
+        wheel \
+    && .venv/bin/pip3 install --no-cache-dir /tmp/wheels/*.whl \
+    && .venv/bin/pip3 install --no-cache-dir \
+        -e '.[zeroconf,hass,whisper_cpp]' \
+    \
+    && rm -rf /tmp/wheels /var/lib/apt/lists/*
+
+COPY ./ ./
+
+# docker_run.sh reads STT_DEVICE; an explicit --device on the command line still
+# wins, since user arguments are appended after it. WYO_WHISPER_STT_LIBRARY is
+# read like --stt-library, which also wins over it.
+#
+# HF_HOME/XDG_CACHE_HOME/MODELSCOPE_CACHE keep the library caches on the /data
+# volume; see the CPU image for why they have to be set here and not in Python.
+ENV STT_DEVICE=vulkan \
+    WYO_WHISPER_STT_LIBRARY=whisper-cpp \
+    HF_HOME=/data \
+    XDG_CACHE_HOME=/data \
+    MODELSCOPE_CACHE=/data/modelscope
+
+EXPOSE 10300
+
+# See the CPU image for why this is a Describe/Info round trip and why the start
+# period is this long.
+HEALTHCHECK --interval=30s --timeout=20s --start-period=5m --retries=3 \
+    CMD ["/usr/src/.venv/bin/python3", "-m", "wyoming_faster_whisper.health_check"]
+
+ENTRYPOINT ["bash", "docker_run.sh"]

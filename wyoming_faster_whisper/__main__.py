@@ -73,8 +73,9 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--device",
         default="cpu",
-        help="Device to use for inference: cpu, cuda, or cuda:N (default: cpu). "
-        "CUDA requires the GPU image or GPU-enabled wheels; see README.",
+        help="Device to use for inference: cpu, cuda, cuda:N, vulkan, or vulkan:N "
+        "(default: cpu). CUDA requires the GPU image or GPU-enabled wheels; "
+        "Vulkan requires the Vulkan image and --stt-library whisper-cpp; see README.",
     )
     parser.add_argument(
         "--language",
@@ -97,7 +98,7 @@ def get_parser() -> argparse.ArgumentParser:
         "--cpu-threads",
         default=4,
         type=int,
-        help="Number of CPU threads to use for inference (default: 4, faster-whisper, sherpa-onnx, and qwen3-asr)",
+        help="Number of CPU threads to use for inference (default: 4, faster-whisper, sherpa-onnx, qwen3-asr, and whisper-cpp)",
     )
     parser.add_argument(
         "--initial-prompt",
