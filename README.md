@@ -359,8 +359,17 @@ last. `Dockerfile.gpu` does exactly this and is the working reference.
 
 `Dockerfile.vulkan` runs Whisper on any GPU with a Mesa Vulkan driver — AMD
 Radeon cards and **APU iGPUs that ROCm does not support** (e.g. the Radeon
-Vega 7 in a Ryzen 5 5600G), and Intel graphics. Like the CUDA image, **it is not
-published to Docker Hub — you build it yourself**:
+Vega 7 in a Ryzen 5 5600G), and Intel graphics. It is published to the GitHub
+Container Registry (amd64 only) by the `Docker (Vulkan)` workflow:
+
+| Tag | Built from |
+| --- | --- |
+| `ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest`, `:<version>` | each GitHub release |
+| `ghcr.io/frauhottelmann/wyoming-vulkan-whisper:main` | every push to `main` |
+
+Every build is smoke-tested first: the container transcribes a test recording
+through whisper.cpp's Vulkan backend (on Mesa's software Vulkan device, since
+CI runners have no GPU) before anything is pushed. To build it yourself:
 
 ``` sh
 git clone https://github.com/OHF-Voice/wyoming-faster-whisper.git
@@ -382,7 +391,7 @@ The container needs the GPU's render node, and permission to open it:
 docker run -it -p 10300:10300 -v /path/to/local/data:/data \
     --device /dev/dri \
     --group-add "$(getent group render | cut -d: -f3)" \
-    wyoming-whisper:vulkan --language de
+    ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest --language de
 ```
 
 or with Compose:
@@ -390,7 +399,7 @@ or with Compose:
 ``` yaml
 services:
   whisper:
-    image: wyoming-whisper:vulkan
+    image: ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest
     ports: ["10300:10300"]
     volumes: ["./data:/data"]
     devices: ["/dev/dri:/dev/dri"]
@@ -422,7 +431,7 @@ variants. The default here is `small`. A path to a `.bin` file, or
 works too:
 
 ``` sh
-docker run ... wyoming-whisper:vulkan --model large-v3-turbo-q5_0 --language de
+docker run ... ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest --model large-v3-turbo-q5_0 --language de
 ```
 
 Notes:

@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Transcribe a WAV file through a running Wyoming server and check the text.
+
+Used by CI against a freshly built container image:
+
+    script/smoke_test --uri tcp://127.0.0.1:10300 \
+        --wav tests/turn_on_the_living_room_lamp.wav \
+        --expect "turn on the living room lamp"
+
+Waits for the server to come up (it only listens once its model is loaded),
+then compares the transcript case- and punctuation-insensitively.
+"""
+
+import argparse
+import asyncio
+import re
+import sys
+import time
+import wave
+
+from wyoming.asr import Transcribe, Transcript
+from wyoming.audio import AudioStart, AudioStop, wav_to_chunks
+from wyoming.client import AsyncClient
+from wyoming.info import Describe, Info
+
+
+def _normalize(text: str) -> str:
+    return " ".join(re.sub(r"[^\w ]", " ", text.lower()).split())
+
+
+async def _describe(uri: str, timeout: float) -> Info:
+    """Ask for the server's Info, retrying until it is up.
+
+    A published Docker port accepts connections before the server inside is
+    listening and then drops them, so a successful connect proves nothing:
+    retry the whole round trip.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        client = AsyncClient.from_uri(uri)
+        try:
+            await client.connect()
+            try:
+                await client.write_event(Describe().event())
+                while True:
+                    event = await asyncio.wait_for(client.read_event(), 30)
+                    if event is None:
+                        raise ConnectionError("server closed the connection")
+                    if Info.is_type(event.type):
+                        return Info.from_event(event)
+            finally:
+                try:
+                    await client.disconnect()
+                except OSError:
+                    pass
+        except (OSError, asyncio.TimeoutError):
+            if time.monotonic() > deadline:
+                raise
+            await asyncio.sleep(2)
+
+
+async def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--uri", default="tcp://127.0.0.1:10300")
+    parser.add_argument("--wav", required=True)
+    parser.add_argument("--expect", required=True)
+    parser.add_argument("--language")
+    parser.add_argument("--start-timeout", type=float, default=600)
+    parser.add_argument("--transcribe-timeout", type=float, default=300)
+    args = parser.parse_args()
+
+    info = await _describe(args.uri, args.start_timeout)
+    print(f"Info: {len(info.asr[0].models[0].languages)} language(s)")
+
+    client = AsyncClient.from_uri(args.uri)
+    await client.connect()
+    try:
+        start = time.monotonic()
+        await client.write_event(Transcribe(language=args.language).event())
+        with wave.open(args.wav, "rb") as wav_file:
+            await client.write_event(
+                AudioStart(
+                    rate=wav_file.getframerate(),
+                    width=wav_file.getsampwidth(),
+                    channels=wav_file.getnchannels(),
+                ).event()
+            )
+            for chunk in wav_to_chunks(wav_file, 1024):
+                await client.write_event(chunk.event())
+        await client.write_event(AudioStop().event())
+
+        while True:
+            event = await asyncio.wait_for(client.read_event(), args.transcribe_timeout)
+            assert event is not None, "server closed the connection"
+            if Transcript.is_type(event.type):
+                text = Transcript.from_event(event).text
+                break
+    finally:
+        await client.disconnect()
+
+    elapsed = time.monotonic() - start
+    print(f"Transcript ({elapsed:.1f}s): {text!r}")
+    if _normalize(text) != _normalize(args.expect):
+        print(f"Expected: {args.expect!r}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))

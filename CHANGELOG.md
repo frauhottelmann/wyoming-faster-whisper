@@ -11,6 +11,11 @@
   `--stt-library whisper-cpp --device vulkan`
 - `--device` accepts `vulkan` and `vulkan:N`. faster-whisper, which has no
   Vulkan backend, runs on the CPU with a warning when given one
+- CI: a `Docker (Vulkan)` workflow builds the Vulkan image, smoke-tests a real
+  transcription through the Vulkan backend (Mesa lavapipe), and publishes it to
+  `ghcr.io/frauhottelmann/wyoming-vulkan-whisper` on pushes to `main` and on
+  releases. The test workflow now also lints, runs on pushes to `main`, and
+  covers the whisper-cpp backend end to end
 
 ## 3.9.0
 

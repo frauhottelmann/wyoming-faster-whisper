@@ -3,12 +3,43 @@ name: Test
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build_wheels:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Every optional backend that pylint/mypy need to see is installed, so
+      # their imports resolve.
+      - name: Install
+        run: |
+          script/setup --dev --qwen3-asr --hass --whisper-cpp
+
+      - name: Lint
+        run: script/lint
+
+      - name: Lint CI scripts
+        run: |
+          .venv/bin/black --check script/smoke_test tests
+          .venv/bin/flake8 script/smoke_test
+
+  test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -22,9 +53,20 @@ jobs:
         with:
           python-version: "3.13"
 
+      # Models are downloaded into ./local by the end-to-end tests.
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: local
+          key: models-${{ hashFiles('tests/test_*.py') }}
+          restore-keys: models-
+
+      # --whisper-cpp installs the CPU pywhispercpp wheel, so the whisper-cpp
+      # backend runs end to end here too; its Vulkan build is covered by the
+      # Docker workflow.
       - name: Install
         run: |
-          script/setup --dev --transformers --qwen3-asr --hass
+          script/setup --dev --transformers --qwen3-asr --hass --whisper-cpp
 
       - name: Run tests
         run: script/test
