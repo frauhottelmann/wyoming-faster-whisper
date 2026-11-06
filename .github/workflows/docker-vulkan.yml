@@ -87,6 +87,7 @@ jobs:
             --user "$(id -u):$(id -g)" \
             -v "$DATA_DIR:/data" \
             -e GGML_VK_VISIBLE_DEVICES=0 \
+            -e GGML_VK_DISABLE_COOPMAT=1 \
             wyoming-vulkan-whisper:test \
             --model base --language en --vad-clip
 
