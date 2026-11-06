@@ -23,6 +23,9 @@
 - Removed the CPU (`Dockerfile`) and CUDA (`Dockerfile.gpu`) images and the
   Docker Hub publish step: this fork only publishes the Vulkan image. The
   other two stay available upstream in OHF-Voice/wyoming-faster-whisper
+- Removed the release workflow (`publish.yml`: PyPI upload and GitHub release
+  on version tags). The fork does not publish to PyPI; the Vulkan image is
+  built and pushed by the `Docker (Vulkan)` workflow
 
 ## 3.9.0
 
