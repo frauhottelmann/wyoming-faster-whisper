@@ -26,16 +26,24 @@
 # third of the CPU image's size, with no ROCm stack at all - the Mesa RADV
 # driver is a few tens of MB.
 #
-# Ubuntu 24.04 rather than the Debian base of the CPU image: its updates carry a
-# current Mesa (RADV 25.x), plus the glslc and SPIR-V headers that whisper.cpp's
-# Vulkan shaders are compiled with.
+# Ubuntu 26.04 LTS rather than the Debian base of the CPU image: it carries a
+# current Mesa (RADV 26.x), plus the glslc and SPIR-V headers that whisper.cpp's
+# Vulkan shaders are compiled with. Newer RADV releases matter here - most of
+# the Vulkan speedups for RDNA and Vega iGPUs land in the driver, not in ggml.
 
 # -----------------------------------------------------------------------------
 # Build stage: compile whisper.cpp (with the Vulkan backend) into a wheel.
 # -----------------------------------------------------------------------------
-FROM ubuntu:24.04 AS build
+FROM ubuntu:26.04 AS build
 
+# pywhispercpp pins whisper.cpp as a git submodule, and its latest release
+# (1.5.1) still points at whisper.cpp v1.8.5. The bindings only use the stable
+# whisper.h API, so the submodule is moved to a newer whisper.cpp release here
+# to pick up the ggml Vulkan backend's improvements (faster shaders, flash
+# attention, more ops on the GPU) without waiting for a pywhispercpp release.
+# Set WHISPER_CPP_VERSION="" to build the submodule pywhispercpp ships with.
 ARG PYWHISPERCPP_VERSION=1.5.1
+ARG WHISPER_CPP_VERSION=1.9.5
 
 # GGML_NATIVE=OFF keeps the CPU kernels portable instead of tuning them for the
 # machine that happens to build the image; AVX2/FMA/F16C cover every x86-64 CPU
@@ -63,8 +71,10 @@ WORKDIR /build
 
 # pywhispercpp's setup.py forwards every environment variable to CMake as a
 # -D definition, which is how GGML_VULKAN (and the flags above) reach the
-# whisper.cpp build. --no-binary forces the source build: the PyPI wheels are
-# CPU-only.
+# whisper.cpp build. It is built from a git checkout rather than the PyPI sdist
+# so the whisper.cpp submodule can be moved (see WHISPER_CPP_VERSION); the PyPI
+# wheels are CPU-only either way. SETUPTOOLS_SCM_PRETEND_VERSION keeps the wheel
+# at the release version instead of a "+dirty" dev version derived from git.
 #
 # BUILD_SHARED_LIBS=OFF links whisper.cpp and ggml statically into the
 # extension module. Built shared, the wheel would carry its own libggml.so.0
@@ -72,23 +82,31 @@ WORKDIR /build
 # startup, ships a different ggml release under that same soname. Whichever
 # loads first would be used by both, which is an ABI mismatch waiting to crash.
 RUN \
-    python3 -m venv /build/.venv \
+    git clone --depth 1 --branch "v${PYWHISPERCPP_VERSION}" \
+        --recurse-submodules --shallow-submodules \
+        https://github.com/absadiki/pywhispercpp.git /build/pywhispercpp \
+    && if [ -n "${WHISPER_CPP_VERSION}" ]; then \
+           git -C /build/pywhispercpp/whisper.cpp fetch --depth 1 --no-tags origin \
+               "refs/tags/v${WHISPER_CPP_VERSION}:refs/tags/v${WHISPER_CPP_VERSION}" \
+           && git -C /build/pywhispercpp/whisper.cpp checkout -q "v${WHISPER_CPP_VERSION}"; \
+       fi \
+    && python3 -m venv /build/.venv \
     && /build/.venv/bin/pip3 install --no-cache-dir -U pip setuptools wheel \
     && if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
            for flag in ${GGML_CPU_FLAGS}; do export "${flag?}"; done; \
        fi \
-    && GGML_VULKAN=1 GGML_NATIVE=OFF \
+    && SETUPTOOLS_SCM_PRETEND_VERSION="${PYWHISPERCPP_VERSION}" \
+        GGML_VULKAN=1 GGML_NATIVE=OFF \
         BUILD_SHARED_LIBS=OFF CMAKE_POSITION_INDEPENDENT_CODE=ON \
         CMAKE_BUILD_PARALLEL_LEVEL="$(nproc)" \
         /build/.venv/bin/pip3 wheel --no-cache-dir --no-deps \
-        --no-binary pywhispercpp \
         -w /build/wheels \
-        "pywhispercpp==${PYWHISPERCPP_VERSION}"
+        /build/pywhispercpp
 
 # -----------------------------------------------------------------------------
 # Runtime stage
 # -----------------------------------------------------------------------------
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 WORKDIR /usr/src
 
