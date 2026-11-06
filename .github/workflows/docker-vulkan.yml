@@ -83,6 +83,13 @@ jobs:
           mkdir -p "$DATA_DIR"
           # As the runner's user, so the files written to /data (the model,
           # Mesa's shader cache) stay readable for the cache step.
+          #
+          # GGML_VK_DISABLE_COOPMAT: lavapipe in Mesa 26 (Ubuntu 26.04)
+          # advertises VK_KHR_cooperative_matrix, and with ggml's coopmat
+          # shaders it decodes this clip as "(Music)". With them off it
+          # transcribes correctly. The flag is set for this test only; the
+          # image does not set it, so GPUs with cooperative matrix support
+          # (RDNA3 and newer under RADV) still use those shaders.
           docker run -d --name whisper -p 10300:10300 \
             --user "$(id -u):$(id -g)" \
             -v "$DATA_DIR:/data" \
