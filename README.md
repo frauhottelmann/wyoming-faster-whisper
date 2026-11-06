@@ -183,7 +183,7 @@ name the integration gave the thing, so each one sits directly behind the name i
 belongs to and shares its tier — a light's "standing light" is kept or dropped
 along with the light, never left out while lower-priority names get in.
 
-Edit `PRIORITY_DOMAINS` in `wyoming_faster_whisper/hass_api.py` to change what
+Edit `PRIORITY_DOMAINS` in `wyoming_vulkan_whisper/hass_api.py` to change what
 lands in tier 2. Run with `--debug` to see how many names were dropped and the
 exact prompt used. `--initial-prompt` still works and is kept at the front of the
 prompt, ahead of anything discovered from Home Assistant.
@@ -268,7 +268,7 @@ To run it by hand:
 
 ``` sh
 docker exec whisper \
-    /usr/src/.venv/bin/python3 -m wyoming_faster_whisper.health_check
+    /usr/src/.venv/bin/python3 -m wyoming_vulkan_whisper.health_check
 ```
 
 It prints nothing and exits 0 when healthy, or prints `unhealthy: <reason>` and
@@ -282,7 +282,7 @@ to the check, so give it the same one:
 ```yaml
     healthcheck:
       test: ["CMD", "/usr/src/.venv/bin/python3", "-m",
-             "wyoming_faster_whisper.health_check",
+             "wyoming_vulkan_whisper.health_check",
              "--uri", "tcp://127.0.0.1:10400"]
 ```
 
@@ -364,7 +364,7 @@ into the entrypoint; those are dropped when the matching variable is set, so
 
 ## Development
 
-The server is a Python package (`wyoming_faster_whisper`, named after upstream).
+The server is a Python package, `wyoming_vulkan_whisper`.
 For tests and linting, a virtual environment with the CPU-only pywhispercpp
 wheel from PyPI is enough:
 

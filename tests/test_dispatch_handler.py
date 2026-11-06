@@ -19,13 +19,13 @@ from wyoming.asr import Transcribe, Transcript  # noqa: E402
 from wyoming.audio import AudioChunk, AudioStart, AudioStop  # noqa: E402
 from wyoming.info import Info  # noqa: E402
 
-from wyoming_faster_whisper.const import (  # noqa: E402
+from wyoming_vulkan_whisper.const import (  # noqa: E402
     Transcriber,
 )
-from wyoming_faster_whisper.dispatch_handler import DispatchEventHandler  # noqa: E402
-from wyoming_faster_whisper.hass_api import HomeAssistantError  # noqa: E402
-from wyoming_faster_whisper.name_cache import HassNameCache  # noqa: E402
-from wyoming_faster_whisper.vocabulary import RecognitionContext  # noqa: E402
+from wyoming_vulkan_whisper.dispatch_handler import DispatchEventHandler  # noqa: E402
+from wyoming_vulkan_whisper.hass_api import HomeAssistantError  # noqa: E402
+from wyoming_vulkan_whisper.name_cache import HassNameCache  # noqa: E402
+from wyoming_vulkan_whisper.vocabulary import RecognitionContext  # noqa: E402
 
 RATE = 16000
 
@@ -392,7 +392,7 @@ async def test_clipping_is_skipped_without_vad_clip():
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(
-            "wyoming_faster_whisper.dispatch_handler.clip_wav_to_speech", fake_clip
+            "wyoming_vulkan_whisper.dispatch_handler.clip_wav_to_speech", fake_clip
         )
         await _utterance(handler)
 
@@ -414,7 +414,7 @@ async def test_clipping_is_attempted_with_vad_clip():
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(
-            "wyoming_faster_whisper.dispatch_handler.clip_wav_to_speech", fake_clip
+            "wyoming_vulkan_whisper.dispatch_handler.clip_wav_to_speech", fake_clip
         )
         await _utterance(handler)
 

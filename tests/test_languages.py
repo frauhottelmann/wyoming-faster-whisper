@@ -5,8 +5,8 @@ Dependency-free: the code list does not need whisper.cpp loaded.
 
 import pytest
 
-from wyoming_faster_whisper.const import base_language
-from wyoming_faster_whisper.languages import WHISPER_LANGUAGES, whisper_language
+from wyoming_vulkan_whisper.const import base_language
+from wyoming_vulkan_whisper.languages import WHISPER_LANGUAGES, whisper_language
 
 
 @pytest.mark.parametrize(

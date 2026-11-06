@@ -1,4 +1,4 @@
-"""Tests for wyoming-faster-whisper."""
+"""Tests for wyoming-vulkan-whisper."""
 
 from pathlib import Path
 

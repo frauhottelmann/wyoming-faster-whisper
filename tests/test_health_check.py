@@ -14,14 +14,14 @@ from wyoming.asr import Transcript
 from wyoming.event import Event, async_read_event, async_write_event
 from wyoming.info import AsrProgram, Attribution, Describe, Info
 
-from wyoming_faster_whisper.health_check import DEFAULT_URI, check, default_uri, main
+from wyoming_vulkan_whisper.health_check import DEFAULT_URI, check, default_uri, main
 
 Responder = Callable[[Event, asyncio.StreamWriter], Awaitable[bool]]
 
 INFO = Info(
     asr=[
         AsrProgram(
-            name="faster-whisper",
+            name="whisper.cpp",
             description="Faster Whisper transcription with CTranslate2",
             attribution=Attribution(name="Test", url="http://example.com"),
             installed=True,

@@ -7,9 +7,9 @@ import logging
 
 import pytest
 
-from wyoming_faster_whisper.__main__ import _warn_if_language_unsupported
-from wyoming_faster_whisper.languages import WHISPER_LANGUAGES
-from wyoming_faster_whisper.models import (
+from wyoming_vulkan_whisper.__main__ import _warn_if_language_unsupported
+from wyoming_vulkan_whisper.languages import WHISPER_LANGUAGES
+from wyoming_vulkan_whisper.models import (
     ModelLoader,
     guess_model,
     is_distil_whisper,

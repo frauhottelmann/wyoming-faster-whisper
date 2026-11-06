@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pytest
 
-from wyoming_faster_whisper.__main__ import get_parser
-from wyoming_faster_whisper.env_args import parse_args
+from wyoming_vulkan_whisper.__main__ import get_parser
+from wyoming_vulkan_whisper.env_args import parse_args
 
 # Enough to satisfy the required options when the test is about something else.
 BASE_ARGS = ["--uri", "tcp://0.0.0.0:10300", "--data-dir", "/data"]
@@ -176,21 +176,19 @@ def test_list_arg_empty() -> None:
 
 def test_optional_value_arg() -> None:
     """An option with an optional value takes its constant when empty."""
-    assert run(WYO_WHISPER_ZEROCONF="").zeroconf == "faster-whisper"
+    assert run(WYO_WHISPER_ZEROCONF="").zeroconf == "vulkan-whisper"
     assert run(WYO_WHISPER_ZEROCONF="kitchen").zeroconf == "kitchen"
 
 
 def test_choices_checked(capsys: pytest.CaptureFixture) -> None:
     """A value outside the option's choices is an error."""
     with pytest.raises(SystemExit):
-        run(WYO_WHISPER_STT_LIBRARY="not-a-library")
+        run(WYO_WHISPER_WHISPER_TASK="not-a-task")
 
-    assert "WYO_WHISPER_STT_LIBRARY" in capsys.readouterr().err
+    assert "WYO_WHISPER_WHISPER_TASK" in capsys.readouterr().err
 
-    # Still accepted, so configurations written for the old multi-backend
-    # server keep starting.
-    args = run(WYO_WHISPER_STT_LIBRARY="whisper-cpp")
-    assert args.stt_library == "whisper-cpp"
+    args = run(WYO_WHISPER_WHISPER_TASK="translate")
+    assert args.whisper_task == "translate"
 
 
 def test_secret_file(tmp_path: Path) -> None:

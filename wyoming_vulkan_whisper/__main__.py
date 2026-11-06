@@ -52,8 +52,8 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--zeroconf",
         nargs="?",
-        const="faster-whisper",
-        help="Enable discovery over zeroconf with optional name (default: faster-whisper)",
+        const="vulkan-whisper",
+        help="Enable discovery over zeroconf with optional name (default: vulkan-whisper)",
     )
     #
     parser.add_argument(
@@ -125,13 +125,6 @@ def get_parser() -> argparse.ArgumentParser:
         type=int,
         default=400,
         help="Context kept around speech for --vad-clip in ms (default: 400)",
-    )
-    # Kept so existing configurations that pass it (or set
-    # WYO_WHISPER_STT_LIBRARY) still start: whisper.cpp is the only backend.
-    parser.add_argument(
-        "--stt-library",
-        choices=["auto", "whisper-cpp"],
-        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--local-files-only",

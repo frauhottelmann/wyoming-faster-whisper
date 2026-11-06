@@ -14,10 +14,10 @@ pytest.importorskip("aiohttp")
 # pylint: disable=wrong-import-position
 from wyoming.info import Info  # noqa: E402
 
-from wyoming_faster_whisper.dispatch_handler import DispatchEventHandler  # noqa: E402
-from wyoming_faster_whisper.hass_api import HomeAssistantError  # noqa: E402
-from wyoming_faster_whisper.name_cache import HassNameCache  # noqa: E402
-from wyoming_faster_whisper.vocabulary import RecognitionContext  # noqa: E402
+from wyoming_vulkan_whisper.dispatch_handler import DispatchEventHandler  # noqa: E402
+from wyoming_vulkan_whisper.hass_api import HomeAssistantError  # noqa: E402
+from wyoming_vulkan_whisper.name_cache import HassNameCache  # noqa: E402
+from wyoming_vulkan_whisper.vocabulary import RecognitionContext  # noqa: E402
 
 
 class FakeHass:

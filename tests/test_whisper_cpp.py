@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from wyoming_faster_whisper.device import (
+from wyoming_vulkan_whisper.device import (
     device_index,
     is_gpu,
     is_vulkan,
@@ -53,7 +53,7 @@ def test_whisper_cpp_gpu(device, expected) -> None:
 
 
 def test_model_path_is_used_as_is(tmp_path: Path) -> None:
-    from wyoming_faster_whisper.whisper_cpp_handler import resolve_ggml_model
+    from wyoming_vulkan_whisper.whisper_cpp_handler import resolve_ggml_model
 
     model = tmp_path / "ggml-custom.bin"
     model.write_bytes(b"")
@@ -73,7 +73,7 @@ def test_model_path_is_used_as_is(tmp_path: Path) -> None:
     ],
 )
 def test_model_names_map_to_hub_files(model, repo_id, filename, tmp_path) -> None:
-    from wyoming_faster_whisper import whisper_cpp_handler
+    from wyoming_vulkan_whisper import whisper_cpp_handler
 
     with patch.object(whisper_cpp_handler, "hf_hub_download", return_value="x") as dl:
         whisper_cpp_handler.resolve_ggml_model(model, tmp_path, True)
@@ -85,7 +85,7 @@ def test_model_names_map_to_hub_files(model, repo_id, filename, tmp_path) -> Non
 
 @pytest.mark.parametrize("model", ["rhasspy/faster-whisper-base-int8", "not-a-model"])
 def test_unknown_model_is_rejected(model, tmp_path) -> None:
-    from wyoming_faster_whisper.whisper_cpp_handler import resolve_ggml_model
+    from wyoming_vulkan_whisper.whisper_cpp_handler import resolve_ggml_model
 
     with pytest.raises(ValueError, match="whisper.cpp model"):
         resolve_ggml_model(model, tmp_path, True)

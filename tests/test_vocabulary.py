@@ -6,7 +6,7 @@ needed and the budget is exact and predictable.
 
 import pytest
 
-from wyoming_faster_whisper.vocabulary import (
+from wyoming_vulkan_whisper.vocabulary import (
     RecognitionContext,
     clean_names,
     estimate_tokens,

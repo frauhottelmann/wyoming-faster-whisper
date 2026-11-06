@@ -15,7 +15,7 @@ pytest.importorskip("aiohttp")
 from aiohttp import web  # noqa: E402
 from aiohttp.test_utils import TestServer  # noqa: E402
 
-from wyoming_faster_whisper.hass_api import (  # noqa: E402
+from wyoming_vulkan_whisper.hass_api import (  # noqa: E402
     HomeAssistant,
     HomeAssistantError,
 )

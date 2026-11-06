@@ -25,7 +25,7 @@ async def test_transcribe(extra_args: list) -> None:
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
-        "wyoming_faster_whisper",
+        "wyoming_vulkan_whisper",
         "--uri",
         "stdio://",
         "--model",

@@ -1,5 +1,5 @@
 [project]
-name = "wyoming-faster-whisper"
+name = "wyoming-vulkan-whisper"
 version = "3.9.0"
 description = "Wyoming server for Whisper on whisper.cpp with Vulkan GPU support"
 readme = "README.md"
@@ -40,11 +40,11 @@ zip-safe  = true
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["wyoming_faster_whisper"]
+include = ["wyoming_vulkan_whisper"]
 exclude = ["tests"]
 
 [project.scripts]
-wyoming-faster-whisper = "wyoming_faster_whisper.__main__:run"
+wyoming-vulkan-whisper = "wyoming_vulkan_whisper.__main__:run"
 
 [build-system]
 requires = ["setuptools>=42", "wheel"]

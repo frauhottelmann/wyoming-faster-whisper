@@ -2,8 +2,8 @@
 
 from typing import Iterable, List
 
-from wyoming_faster_whisper import endpointing
-from wyoming_faster_whisper.__main__ import build_info
+from wyoming_vulkan_whisper import endpointing
+from wyoming_vulkan_whisper.__main__ import build_info
 
 
 class ProbabilityDetector:
