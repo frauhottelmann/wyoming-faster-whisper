@@ -19,11 +19,10 @@
 - Updated images and dependencies: the Vulkan image moves to Ubuntu 26.04 LTS
   (Mesa/RADV 26, Python 3.14) and builds whisper.cpp v1.9.5 instead of the
   v1.8.5 that pywhispercpp 1.5.1 bundles (`WHISPER_CPP_VERSION` build arg);
-  the CPU image moves to Debian 13 (trixie, Python 3.13); the CUDA image to
-  CUDA 12.9.2; torch 2.6.0 -> 2.14.1 in both; transformers 4.52.4 -> 4.57.6;
-  GitHub Actions to their current major versions
-- CI: a `Docker (CPU)` workflow builds the CPU image and smoke-tests a
-  transcription on pull requests that touch it
+  transformers 4.52.4 -> 4.57.6; GitHub Actions to their current major versions
+- Removed the CPU (`Dockerfile`) and CUDA (`Dockerfile.gpu`) images and the
+  Docker Hub publish step: this fork only publishes the Vulkan image. The
+  other two stay available upstream in OHF-Voice/wyoming-faster-whisper
 
 ## 3.9.0
 

@@ -1,8 +1,9 @@
-# Vulkan variant of the CPU image in ./Dockerfile, for GPUs that CUDA does not
-# reach: AMD (including APU iGPUs such as the Radeon Vega in Ryzen 5000G/7000
-# parts), Intel, and anything else with a Mesa Vulkan driver.
+# Wyoming speech-to-text image for GPUs that CUDA does not reach: AMD
+# (including APU iGPUs such as the Radeon Vega in Ryzen 5000G/7000 parts),
+# Intel, and anything else with a Mesa Vulkan driver.
 #
-# Not published to Docker Hub - build it locally:
+# Published as ghcr.io/frauhottelmann/wyoming-vulkan-whisper by the
+# "Docker (Vulkan)" workflow. To build it locally:
 #
 #   docker build -f Dockerfile.vulkan -t wyoming-whisper:vulkan .
 #
@@ -15,7 +16,7 @@
 # CTranslate2 (faster-whisper) has no Vulkan backend, so this image transcribes
 # with whisper.cpp instead, through the pywhispercpp bindings built from source
 # with GGML_VULKAN=1. The Wyoming server, its options, and Home Assistant name
-# biasing are the same as in the other images; only the default --stt-library
+# biasing are the same as in upstream's images; only the default --stt-library
 # (whisper-cpp) and --device (vulkan) differ. faster-whisper is still installed
 # - the server imports it unconditionally - and runs on the CPU if you pass
 # --stt-library faster-whisper.
@@ -23,11 +24,11 @@
 # The other optional backends (transformers, sherpa, onnx-asr, qwen3-asr) are
 # left out: none of them can use a Vulkan device, and torch alone would add
 # more than the rest of the image together. That keeps this image at roughly a
-# third of the CPU image's size, with no ROCm stack at all - the Mesa RADV
-# driver is a few tens of MB.
+# third of the size of upstream's CPU image, with no ROCm stack at all - the
+# Mesa RADV driver is a few tens of MB.
 #
-# Ubuntu 26.04 LTS rather than the Debian base of the CPU image: it carries a
-# current Mesa (RADV 26.x), plus the glslc and SPIR-V headers that whisper.cpp's
+# Ubuntu 26.04 LTS rather than upstream's Debian base: it carries a current
+# Mesa (RADV 26.x), plus the glslc and SPIR-V headers that whisper.cpp's
 # Vulkan shaders are compiled with. Newer RADV releases matter here - most of
 # the Vulkan speedups for RDNA and Vega iGPUs land in the driver, not in ggml.
 
@@ -140,8 +141,16 @@ COPY ./ ./
 # wins, since user arguments are appended after it. WYO_WHISPER_STT_LIBRARY is
 # read like --stt-library, which also wins over it.
 #
-# HF_HOME/XDG_CACHE_HOME/MODELSCOPE_CACHE keep the library caches on the /data
-# volume; see the CPU image for why they have to be set here and not in Python.
+# Keep every cache on the /data volume instead of the container's filesystem.
+# Model files already go there (--download-dir defaults to the first --data-dir),
+# but the libraries also write caches that no per-call argument reaches: the Xet
+# chunk cache used during hub downloads is $HF_HOME/xet and can run to several
+# GB, and torch/others fall back to $XDG_CACHE_HOME. Unset, all of that lands in
+# $HOME/.cache - which is thrown away on every container recreate, and is an
+# unwritable /.cache when the container runs as a uid with no passwd entry.
+#
+# These have to be environment variables: huggingface_hub reads them into
+# constants at import time, so setting them from Python would be too late.
 ENV STT_DEVICE=vulkan \
     WYO_WHISPER_STT_LIBRARY=whisper-cpp \
     HF_HOME=/data \
@@ -150,8 +159,11 @@ ENV STT_DEVICE=vulkan \
 
 EXPOSE 10300
 
-# See the CPU image for why this is a Describe/Info round trip and why the start
-# period is this long.
+# The server only starts listening once the model is loaded, which means
+# downloading it on first run -- hence the long start period, during which
+# failures don't count against --retries. --retries covers the other direction:
+# transcription runs on the event loop, so a check can time out behind a long
+# request without the server being unhealthy.
 HEALTHCHECK --interval=30s --timeout=20s --start-period=5m --retries=3 \
     CMD ["/usr/src/.venv/bin/python3", "-m", "wyoming_faster_whisper.health_check"]
 

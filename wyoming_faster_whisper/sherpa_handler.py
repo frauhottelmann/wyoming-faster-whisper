@@ -150,7 +150,7 @@ def _resolve_provider(device: str) -> str:
     Note that the CUDA build is deliberately *not* used in the GPU image: its
     bundled onnxruntime and the pip onnxruntime-gpu package cannot both
     initialize CUDA in one process without crashing, and `--stt-library auto`
-    can load two backends at once. See Dockerfile.gpu.
+    can load two backends at once.
     """
     if not is_gpu(device):
         return "cpu"
