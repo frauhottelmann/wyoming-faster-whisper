@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Union
 import faster_whisper
 
 from .const import Transcriber
-from .device import ctranslate2_device
+from .device import ctranslate2_device, is_vulkan
 from .languages import whisper_language
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +30,15 @@ class FasterWhisperTranscriber(Transcriber):
         self.vad_filter = vad_parameters is not None
         self.vad_parameters = vad_parameters
         self.task = task
+
+        if is_vulkan(device):
+            # The Vulkan image defaults to --device vulkan; CTranslate2 has no
+            # such device, so faster-whisper selected there runs on the CPU.
+            _LOGGER.warning(
+                "faster-whisper has no Vulkan backend; running on the CPU. "
+                "Use --stt-library whisper-cpp for Vulkan."
+            )
+            device = "cpu"
 
         # CTranslate2 takes the GPU ordinal separately, so "cuda:1" has to be
         # split into device + device_index.

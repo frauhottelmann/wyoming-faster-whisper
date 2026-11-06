@@ -106,6 +106,11 @@ qwen3_asr_gpu = [
     "onnxruntime-gpu>=1.19,<1.27",
     "tokenizers>=0.20",
 ]
+# whisper.cpp. The PyPI wheels are CPU-only; Dockerfile.vulkan builds this from
+# source with GGML_VULKAN=1 for AMD/Intel GPUs.
+whisper_cpp = [
+    "pywhispercpp>=1.5.1,<2",
+]
 hass = [
     "aiohttp>=3.8,<4",
 ]

@@ -63,7 +63,7 @@ Pinning a backend narrows it:
 
 | Backend | Languages |
 | --- | --- |
-| `faster-whisper`, `transformers` | Whisper's 100 (just `en` for a `.en` checkpoint) |
+| `faster-whisper`, `transformers`, `whisper-cpp` | Whisper's 100 (just `en` for a `.en` checkpoint) |
 | `qwen3-asr` | 31 |
 | `sherpa` | 25 (Parakeet TDT v3) |
 | `sherpa --sherpa-streaming` | `de`, `en`, `es`, `fr` (the published Kroko models) |
@@ -354,6 +354,98 @@ which will pull the CPU package back in and clobber `onnxruntime-gpu` — both
 install the same `onnxruntime` module and whichever lands second wins, silently,
 since the CPU provider still loads every model. Reinstall `onnxruntime-gpu`
 last. `Dockerfile.gpu` does exactly this and is the working reference.
+
+### Vulkan Image (AMD and Intel GPUs)
+
+`Dockerfile.vulkan` runs Whisper on any GPU with a Mesa Vulkan driver — AMD
+Radeon cards and **APU iGPUs that ROCm does not support** (e.g. the Radeon
+Vega 7 in a Ryzen 5 5600G), and Intel graphics. Like the CUDA image, **it is not
+published to Docker Hub — you build it yourself**:
+
+``` sh
+git clone https://github.com/OHF-Voice/wyoming-faster-whisper.git
+cd wyoming-faster-whisper
+docker build -f Dockerfile.vulkan -t wyoming-whisper:vulkan .
+```
+
+CTranslate2 (and so faster-whisper) has no Vulkan backend, so this image
+transcribes with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) through
+the `whisper-cpp` backend instead, compiled with its Vulkan backend. Everything
+else — the Wyoming protocol, Home Assistant discovery, name biasing, VAD
+endpointing — is the same server. There is no ROCm in it: the image is about
+550 MB of Python environment on top of Ubuntu, against several GB for a ROCm
+stack.
+
+The container needs the GPU's render node, and permission to open it:
+
+``` sh
+docker run -it -p 10300:10300 -v /path/to/local/data:/data \
+    --device /dev/dri \
+    --group-add "$(getent group render | cut -d: -f3)" \
+    wyoming-whisper:vulkan --language de
+```
+
+or with Compose:
+
+``` yaml
+services:
+  whisper:
+    image: wyoming-whisper:vulkan
+    ports: ["10300:10300"]
+    volumes: ["./data:/data"]
+    devices: ["/dev/dri:/dev/dri"]
+    # The numeric gid of the host's render group: getent group render
+    group_add: ["993"]
+    command: --language de
+```
+
+The image defaults to `--stt-library whisper-cpp` and `--device vulkan`
+(`vulkan:1` picks the second GPU, `cpu` disables it). Check the log on the
+first start — whisper.cpp reports what it found:
+
+```
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = AMD Radeon Graphics (RADV RENOIR) (radv) | uma: 1 | fp16: 1 | ...
+whisper_backend_init_gpu: using Vulkan0 backend
+```
+
+If it says `ggml_vulkan: No devices found.` instead, the container cannot open
+`/dev/dri/renderD128` (check `--device` and `--group-add`), and transcription
+runs on the CPU.
+
+Models are whisper.cpp's ggml files, named as whisper.cpp names them and
+downloaded from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
+into `/data` on first use: `tiny`, `base`, `small`, `medium`, `large-v3`,
+`large-v3-turbo`, each also as `.en` and as quantized `-q5_1`/`-q5_0`/`-q8_0`
+variants. The default here is `small`. A path to a `.bin` file, or
+`<owner>/<repo>/<file>.bin` for a ggml file in another HuggingFace repository,
+works too:
+
+``` sh
+docker run ... wyoming-whisper:vulkan --model large-v3-turbo-q5_0 --language de
+```
+
+Notes:
+
+- **iGPUs share system memory.** An APU's Vulkan heap is carved out of RAM; a
+  `small` model needs well under 1 GB, but for `medium` and larger, raise the
+  UMA frame buffer in the BIOS if the load fails with an out-of-memory error.
+- **The faster-whisper names don't apply.** `--model small-int8` and the like
+  name CTranslate2 conversions; use `small`, `small-q8_0`, etc.
+- **`--vad-filter` is faster-whisper only.** `--vad-clip`, `--vad-endpointing`,
+  `--initial-prompt`, `--beam-size`, `--whisper-task translate`, and
+  `--hass-token` all work with `whisper-cpp`.
+- **faster-whisper is still installed** and can be selected with
+  `--stt-library faster-whisper`; it runs on the CPU. The other optional
+  backends are left out of this image, since none of them can use Vulkan.
+- The first transcription after a start is slower: the Vulkan driver compiles
+  whisper.cpp's shaders then and caches them.
+
+Outside Docker, `pip install 'wyoming-faster-whisper[whisper-cpp]'` installs
+the CPU-only pywhispercpp wheel. For Vulkan, build it from source with
+`GGML_VULKAN=1 pip install --no-binary pywhispercpp pywhispercpp` (needs
+`glslc`, the Vulkan and SPIR-V headers, and a compiler), as `Dockerfile.vulkan`
+does.
 
 ## Environment Variables
 

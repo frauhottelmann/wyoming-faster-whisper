@@ -17,6 +17,7 @@ class SttLibrary(str, Enum):
     ONNX_ASR = "onnx-asr"
     FUNASR = "funasr"
     QWEN3_ASR = "qwen3-asr"
+    WHISPER_CPP = "whisper-cpp"
 
 
 AUTO_LANGUAGE = "auto"

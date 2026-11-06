@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- New `whisper-cpp` backend (`--stt-library whisper-cpp`, extra
+  `whisper-cpp`): Whisper through whisper.cpp via pywhispercpp, with
+  whisper.cpp's ggml models (`small`, `large-v3-turbo-q5_0`, ...)
+- New `Dockerfile.vulkan`: whisper.cpp built with its Vulkan backend, for AMD
+  and Intel GPUs that CUDA does not reach - including APU iGPUs that ROCm does
+  not support - with no ROCm stack in the image. Defaults to
+  `--stt-library whisper-cpp --device vulkan`
+- `--device` accepts `vulkan` and `vulkan:N`. faster-whisper, which has no
+  Vulkan backend, runs on the CPU with a warning when given one
+
 ## 3.9.0
 
 - The languages reported to Home Assistant now follow the backend that will
