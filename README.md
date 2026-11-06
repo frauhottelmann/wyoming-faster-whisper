@@ -1,34 +1,114 @@
-# Wyoming Faster Whisper
+# Wyoming Vulkan Whisper
 
-[Wyoming protocol](https://github.com/rhasspy/wyoming) server for the [faster-whisper](https://github.com/guillaumekln/faster-whisper/) speech to text system.
+[Wyoming protocol](https://github.com/rhasspy/wyoming) server that runs
+[Whisper](https://github.com/openai/whisper) speech-to-text on a GPU through
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp)'s **Vulkan** backend,
+packaged as a Docker image for [Home Assistant](https://www.home-assistant.io/)'s
+Assist pipelines.
 
-## Home Assistant Add-on
+Vulkan reaches any GPU with a Mesa driver: AMD Radeon cards, **APU iGPUs that
+ROCm does not support** (e.g. the Radeon Vega 7 in a Ryzen 5 5600G), and Intel
+graphics. There is no ROCm or CUDA in the image: it is about 550 MB of Python
+environment on top of Ubuntu.
 
-[![Show add-on](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=core_whisper)
+This is a fork of
+[OHF-Voice/wyoming-faster-whisper](https://github.com/OHF-Voice/wyoming-faster-whisper),
+reduced to the Vulkan image. For the CPU image
+([`rhasspy/wyoming-whisper`](https://hub.docker.com/r/rhasspy/wyoming-whisper)),
+the CUDA image, and the other speech-to-text backends (faster-whisper,
+transformers, sherpa-onnx, …), use upstream.
 
-[Source](https://github.com/home-assistant/addons/tree/master/whisper)
+## Docker Image
 
-## Local Install
+`ghcr.io/frauhottelmann/wyoming-vulkan-whisper` is built from `Dockerfile.vulkan`
+by the `Docker (Vulkan)` workflow (amd64 only):
 
-Clone the repository and set up Python virtual environment:
+| Tag | Built from |
+| --- | --- |
+| `:latest`, `:<version>`, `:<major>.<minor>` | each GitHub release |
+| `:main` | every push to `main` |
+
+Every build is smoke-tested first: the container transcribes a test recording
+through whisper.cpp's Vulkan backend (on Mesa's software Vulkan device, since
+CI runners have no GPU) before anything is pushed.
+
+The container needs the GPU's render node, and permission to open it:
 
 ``` sh
-git clone https://github.com/OHF-Voice/wyoming-faster-whisper.git
+docker run -it -p 10300:10300 -v /path/to/local/data:/data \
+    --device /dev/dri \
+    --group-add "$(getent group render | cut -d: -f3)" \
+    ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest --language de
+```
+
+or with Compose:
+
+``` yaml
+services:
+  whisper:
+    image: ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest
+    ports: ["10300:10300"]
+    volumes: ["./data:/data"]
+    devices: ["/dev/dri:/dev/dri"]
+    # The numeric gid of the host's render group: getent group render
+    group_add: ["993"]
+    command: --language de
+```
+
+Then add the **Wyoming Protocol** integration in Home Assistant, pointing at
+port 10300 of the Docker host.
+
+The image defaults to `--device vulkan` (`vulkan:1` picks the second GPU, `cpu`
+disables it). Check the log on the first start — whisper.cpp reports what it
+found:
+
+```
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = AMD Radeon Graphics (RADV RENOIR) (radv) | uma: 1 | fp16: 1 | ...
+whisper_backend_init_gpu: using Vulkan0 backend
+```
+
+If it says `ggml_vulkan: No devices found.` instead, the container cannot open
+`/dev/dri/renderD128` (check `--device` and `--group-add`), and transcription
+runs on the CPU.
+
+To build the image yourself:
+
+``` sh
+git clone https://github.com/frauhottelmann/wyoming-faster-whisper.git
 cd wyoming-faster-whisper
-script/setup
+docker build -f Dockerfile.vulkan -t wyoming-whisper:vulkan .
 ```
 
-Run a server anyone can connect to:
+### Models
 
-```sh
-script/run --model tiny-int8 --language en --uri 'tcp://0.0.0.0:10300' --data-dir /data --download-dir /data
+Models are whisper.cpp's ggml files, named as whisper.cpp names them and
+downloaded from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
+into `/data` on first use: `tiny`, `base`, `small`, `medium`, `large-v3`,
+`large-v3-turbo`, each also as `.en` and as quantized `-q5_1`/`-q5_0`/`-q8_0`
+variants. The default is `small` on a GPU and `base` with `--device cpu`. A path
+to a `.bin` file, or `<owner>/<repo>/<file>.bin` for a ggml file in another
+HuggingFace repository, works too:
+
+``` sh
+docker run ... ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest --model large-v3-turbo-q5_0 --language de
 ```
 
-The `--model` can also be a HuggingFace model like `Systran/faster-distil-whisper-small.en`
-(but see [Distil-Whisper models are not compatible](#distil-whisper-models-are-not-compatible)
-if you want name biasing)
+Make sure `/data` is a Docker volume, so models survive the container.
 
-**NOTE**: Models are downloaded to the first `--data-dir` directory.
+The Wyoming service advertises Whisper's 100 languages to Home Assistant, or
+only `en` for an English-only `.en` model. `--language` is checked against that
+list at startup; a region-qualified code like `de-CH` is narrowed to `de`.
+
+### Notes
+
+- **iGPUs share system memory.** An APU's Vulkan heap is carved out of RAM; a
+  `small` model needs well under 1 GB, but for `medium` and larger, raise the
+  UMA frame buffer in the BIOS if the load fails with an out-of-memory error.
+- The first transcription after a start is slower: the Vulkan driver compiles
+  whisper.cpp's shaders then and caches them.
+- `docker run ... --help` lists every option, e.g. `--beam-size`,
+  `--initial-prompt`, or `--whisper-task translate`.
 
 ## Server-side VAD Endpointing
 
@@ -37,7 +117,7 @@ transcribes. Set `--vad-endpointing` to a number of seconds to end the command
 after that much Silero-detected silence and send the transcript immediately:
 
 ```sh
-script/run --uri 'tcp://0.0.0.0:10300' --data-dir /data \
+docker run ... ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest \
     --vad-endpointing 0.7
 ```
 
@@ -47,44 +127,8 @@ before the silence timer starts; brief pauses reset when speech resumes, and a
 command is allowed to run for at least one second. Audio received after the
 endpoint is ignored until the client's eventual `audio-stop`.
 
-This is independent of the existing VAD options. `--vad-filter` still controls
-Faster Whisper's filtering during transcription, while `--vad-clip` still trims
-the completed batch WAV before transcription. They can be used together with
-`--vad-endpointing`; the only intentional interaction is replacing Home
-Assistant's external endpointing while this option is enabled.
-
-## Reported Languages
-
-The Wyoming service advertises the languages the **configured backend** can
-actually transcribe, not a fixed list. Under the default `--stt-library auto` the
-backend is chosen per language, with faster-whisper as the fallback for anything
-the specialized backends don't claim, so all of Whisper's languages are reported.
-Pinning a backend narrows it:
-
-| Backend | Languages |
-| --- | --- |
-| `faster-whisper`, `transformers`, `whisper-cpp` | Whisper's 100 (just `en` for a `.en` checkpoint) |
-| `qwen3-asr` | 31 |
-| `sherpa` | 25 (Parakeet TDT v3) |
-| `sherpa --sherpa-streaming` | `de`, `en`, `es`, `fr` (the published Kroko models) |
-| `funasr` | `en`, `ja`, `ko`, `yue`, `zh`, `zh-CN`, `zh-HK`, `zh-TW` (SenseVoice) |
-| `onnx-asr` | `ru` (GigaAM) |
-
-`--language` is checked against this list at startup, and a region-qualified code
-is accepted everywhere — `en-US` selects the same backend and model as `en`, and
-`zh-HK`/`zh_HK` stays Cantonese rather than falling back to Mandarin.
-
-This matters because Home Assistant picks the pipeline's STT language out of this
-list. A backend that over-reports gets handed languages it will transcribe as
-gibberish; one that under-reports is unreachable for languages it handles well.
-
-Codes are reported in the form Home Assistant matches against, which is why
-Cantonese is advertised as **`zh-HK`** rather than only `yue`. Home Assistant
-treats `yue` and `zh` as unrelated languages, and `home-assistant/intents` ships
-`zh-CN`/`zh-HK`/`zh-TW` with no bare `zh` or `yue` — so a backend that says only
-`yue` can never be reached by a Cantonese pipeline. Both Cantonese-capable
-backends (`funasr`, `qwen3-asr`) advertise `zh-HK` and decode it as Cantonese,
-while `zh-CN` and `zh-TW` still fall through to Mandarin.
+This is independent of `--vad-clip`, which trims leading and trailing silence
+from the finished recording before transcription. The two can be combined.
 
 ## Biasing Toward Your Home Assistant Names
 
@@ -97,14 +141,8 @@ Home Assistant websocket API and feeds them to the model as a prompt, which fixe
 exactly that class of error:
 
 ```sh
-script/run --uri 'tcp://0.0.0.0:10300' --data-dir /data \
+docker run ... ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest \
     --hass-token "$TOKEN" --hass-api 'http://homeassistant.local:8123/api'
-```
-
-Requires the `hass` extra:
-
-```sh
-pip install 'wyoming-faster-whisper[hass]'
 ```
 
 It collects the names of **conversation-exposed** entities and their aliases, plus
@@ -145,19 +183,16 @@ name the integration gave the thing, so each one sits directly behind the name i
 belongs to and shares its tier — a light's "standing light" is kept or dropped
 along with the light, never left out while lower-priority names get in.
 
-Edit `PRIORITY_DOMAINS` in `wyoming_faster_whisper/hass_api.py` to change what
+Edit `PRIORITY_DOMAINS` in `wyoming_vulkan_whisper/hass_api.py` to change what
 lands in tier 2. Run with `--debug` to see how many names were dropped and the
 exact prompt used. `--initial-prompt` still works and is kept at the front of the
 prompt, ahead of anything discovered from Home Assistant.
 
-This biases `faster-whisper` and `qwen3-asr`, the backends that take a prompt.
-Others ignore it.
-
 ### Distil-Whisper models are not compatible
 
-Distil-Whisper checkpoints (`Systran/faster-distil-whisper-*`, `distil-small.en`,
-`distil-large-v3`, …) were distilled without previous-text conditioning, so a
-prompt is at best wasted on them and at worst destroys the transcription. This
+Distil-Whisper checkpoints (`distil-small.en`, `distil-large-v3`, …) were
+distilled without previous-text conditioning, so a prompt is at best wasted on
+them and at worst destroys the transcription. This
 applies to `--initial-prompt` as much as to `--hass-token`; the server warns at
 startup and sends the prompt anyway, since a very short one may be harmless.
 
@@ -172,145 +207,7 @@ Measured on the same clean commands, comparing no prompt against a 29-name
 
 Use a standard Whisper model to bias toward your names.
 
-### Prompt cost on qwen3-asr
-
-For `qwen3-asr` the prompt is not free: the model has to read it before it starts
-decoding, at roughly 2.8ms per token, so a 50-name list can double the time for a
-short command.
-
-The default model avoids this. The prompt sits ahead of the audio in the chat
-template, so its state depends only on the prompt and is computed once, then
-reused for every later utterance. The layout is chosen from the files present, so
-older model directories with `decoder_init`/`decoder_step` keep working as before
-— pass `--model rhasspy/qwen3-asr-0.6b-onnx-int4` to use one.
-
-Measured on a Pi 5 (4 threads, 3.2s command, 50 names):
-
-| | split | merged (default) |
-| --- | --- | --- |
-| latency | 3.42s | 2.20s |
-| peak RSS | 2.25 GB | 1.55 GB |
-| on disk | 1407 MB | 785 MB |
-
-The latency win is for short commands. Long-form audio gains little (~1.04x on a
-30s clip), because the cached prompt is a small share of that work — though the
-memory saving grows with length.
-
-Accuracy is unchanged: on LibriSpeech test-other (n=200) the two produce
-byte-identical transcripts with no prompt (5.35% WER for both), and 5.33% vs
-5.43% with a 50-name prompt.
-
-## Docker Image (Vulkan: AMD and Intel GPUs)
-
-This fork publishes one image, the Vulkan one below. The CPU image is
-[`rhasspy/wyoming-whisper`](https://hub.docker.com/r/rhasspy/wyoming-whisper)
-and the CUDA image is `Dockerfile.gpu`, both in the upstream repository
-[OHF-Voice/wyoming-faster-whisper](https://github.com/OHF-Voice/wyoming-faster-whisper).
-
-
-`Dockerfile.vulkan` runs Whisper on any GPU with a Mesa Vulkan driver — AMD
-Radeon cards and **APU iGPUs that ROCm does not support** (e.g. the Radeon
-Vega 7 in a Ryzen 5 5600G), and Intel graphics. It is published to the GitHub
-Container Registry (amd64 only) by the `Docker (Vulkan)` workflow:
-
-| Tag | Built from |
-| --- | --- |
-| `ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest`, `:<version>` | each GitHub release |
-| `ghcr.io/frauhottelmann/wyoming-vulkan-whisper:main` | every push to `main` |
-
-Every build is smoke-tested first: the container transcribes a test recording
-through whisper.cpp's Vulkan backend (on Mesa's software Vulkan device, since
-CI runners have no GPU) before anything is pushed. To build it yourself:
-
-``` sh
-git clone https://github.com/frauhottelmann/wyoming-faster-whisper.git
-cd wyoming-faster-whisper
-docker build -f Dockerfile.vulkan -t wyoming-whisper:vulkan .
-```
-
-CTranslate2 (and so faster-whisper) has no Vulkan backend, so this image
-transcribes with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) through
-the `whisper-cpp` backend instead, compiled with its Vulkan backend. Everything
-else — the Wyoming protocol, Home Assistant discovery, name biasing, VAD
-endpointing — is the same server. There is no ROCm in it: the image is about
-550 MB of Python environment on top of Ubuntu, against several GB for a ROCm
-stack.
-
-The container needs the GPU's render node, and permission to open it:
-
-``` sh
-docker run -it -p 10300:10300 -v /path/to/local/data:/data \
-    --device /dev/dri \
-    --group-add "$(getent group render | cut -d: -f3)" \
-    ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest --language de
-```
-
-or with Compose:
-
-``` yaml
-services:
-  whisper:
-    image: ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest
-    ports: ["10300:10300"]
-    volumes: ["./data:/data"]
-    devices: ["/dev/dri:/dev/dri"]
-    # The numeric gid of the host's render group: getent group render
-    group_add: ["993"]
-    command: --language de
-```
-
-The image defaults to `--stt-library whisper-cpp` and `--device vulkan`
-(`vulkan:1` picks the second GPU, `cpu` disables it). Check the log on the
-first start — whisper.cpp reports what it found:
-
-```
-ggml_vulkan: Found 1 Vulkan devices:
-ggml_vulkan: 0 = AMD Radeon Graphics (RADV RENOIR) (radv) | uma: 1 | fp16: 1 | ...
-whisper_backend_init_gpu: using Vulkan0 backend
-```
-
-If it says `ggml_vulkan: No devices found.` instead, the container cannot open
-`/dev/dri/renderD128` (check `--device` and `--group-add`), and transcription
-runs on the CPU.
-
-Models are whisper.cpp's ggml files, named as whisper.cpp names them and
-downloaded from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
-into `/data` on first use: `tiny`, `base`, `small`, `medium`, `large-v3`,
-`large-v3-turbo`, each also as `.en` and as quantized `-q5_1`/`-q5_0`/`-q8_0`
-variants. The default here is `small`. A path to a `.bin` file, or
-`<owner>/<repo>/<file>.bin` for a ggml file in another HuggingFace repository,
-works too:
-
-``` sh
-docker run ... ghcr.io/frauhottelmann/wyoming-vulkan-whisper:latest --model large-v3-turbo-q5_0 --language de
-```
-
-Notes:
-
-- **iGPUs share system memory.** An APU's Vulkan heap is carved out of RAM; a
-  `small` model needs well under 1 GB, but for `medium` and larger, raise the
-  UMA frame buffer in the BIOS if the load fails with an out-of-memory error.
-- **The faster-whisper names don't apply.** `--model small-int8` and the like
-  name CTranslate2 conversions; use `small`, `small-q8_0`, etc.
-- **`--vad-filter` is faster-whisper only.** `--vad-clip`, `--vad-endpointing`,
-  `--initial-prompt`, `--beam-size`, `--whisper-task translate`, and
-  `--hass-token` all work with `whisper-cpp`.
-- **faster-whisper is still installed** and can be selected with
-  `--stt-library faster-whisper`; it runs on the CPU. The other optional
-  backends are left out of this image, since none of them can use Vulkan.
-- The first transcription after a start is slower: the Vulkan driver compiles
-  whisper.cpp's shaders then and caches them.
-
-Outside Docker, `pip install 'wyoming-faster-whisper[whisper-cpp]'` installs
-the CPU-only pywhispercpp wheel. For Vulkan, build it from source with
-`GGML_VULKAN=1 pip install --no-binary pywhispercpp pywhispercpp` (needs
-`glslc`, the Vulkan and SPIR-V headers, and a compiler). `Dockerfile.vulkan`
-does the same from a git checkout, with a newer whisper.cpp than the one
-pywhispercpp bundles.
-
-Models are downloaded to `/data`, so make sure this points to a Docker volume.
-
-### Running Without Internet Access
+## Running Without Internet Access
 
 A model that is already downloaded is loaded from disk without contacting
 Hugging Face, so a container that has been started once keeps working on a
@@ -346,13 +243,12 @@ networks:
     internal: true
 ```
 
-Both images point `HF_HOME`, `XDG_CACHE_HOME`, and `MODELSCOPE_CACHE` at `/data`
-so the caches these libraries keep outside the model directory land on the
-volume too. The largest is the Xet chunk cache used while downloading, which can
-run to several GB. Outside Docker, set them yourself if you don't want them in
+The image points `HF_HOME` and `XDG_CACHE_HOME` at `/data` so the caches kept
+outside the model directory land on the volume too. The largest is the Xet chunk
+cache used while downloading, which can run to several GB. Outside Docker, set them yourself if you don't want them in
 `~/.cache`.
 
-### Health Check
+## Health Check
 
 The image carries a `HEALTHCHECK`, so `docker ps` reports `healthy` or
 `unhealthy` and a Compose stack can wait on it with `depends_on:` /
@@ -372,7 +268,7 @@ To run it by hand:
 
 ``` sh
 docker exec whisper \
-    /usr/src/.venv/bin/python3 -m wyoming_faster_whisper.health_check
+    /usr/src/.venv/bin/python3 -m wyoming_vulkan_whisper.health_check
 ```
 
 It prints nothing and exits 0 when healthy, or prints `unhealthy: <reason>` and
@@ -386,26 +282,9 @@ to the check, so give it the same one:
 ```yaml
     healthcheck:
       test: ["CMD", "/usr/src/.venv/bin/python3", "-m",
-             "wyoming_faster_whisper.health_check",
+             "wyoming_vulkan_whisper.health_check",
              "--uri", "tcp://127.0.0.1:10400"]
 ```
-
-### GPU Without Docker
-
-For a local install rather than a container, the two onnxruntime-based backends
-have GPU counterparts of their extras — `onnx-asr-gpu` and `qwen3-asr-gpu`,
-which pull `onnxruntime-gpu` in place of `onnxruntime`:
-
-``` sh
-pip install 'wyoming-faster-whisper[transformers,onnx-asr-gpu,qwen3-asr-gpu]'
-```
-
-faster-whisper additionally needs a CUDA-enabled CTranslate2 and torch built for
-your CUDA version, and it depends on `onnxruntime` (for its bundled Silero VAD),
-which will pull the CPU package back in and clobber `onnxruntime-gpu` — both
-install the same `onnxruntime` module and whichever lands second wins, silently,
-since the CPU provider still loads every model. Reinstall `onnxruntime-gpu`
-last.
 
 ## Environment Variables
 
@@ -418,7 +297,7 @@ underscores and a `WYO_WHISPER_` prefix:
 | --- | --- |
 | `--model` | `WYO_WHISPER_MODEL` |
 | `--language` | `WYO_WHISPER_LANGUAGE` |
-| `--stt-library` | `WYO_WHISPER_STT_LIBRARY` |
+| `--device` | `WYO_WHISPER_DEVICE` |
 | `--vad-endpointing` | `WYO_WHISPER_VAD_ENDPOINTING` |
 | `--hass-token` | `WYO_WHISPER_HASS_TOKEN` |
 | ...and so on for every option in `--help` | |
@@ -432,14 +311,12 @@ running with a default you thought you had changed.
 A few options don't take a plain string on the command line, so they read one
 specially:
 
-- **Flags** (`--debug`, `--vad-filter`, `--local-files-only`, ...) take
+- **Flags** (`--debug`, `--vad-clip`, `--local-files-only`, ...) take
   `1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off`/empty. Unlike a plain "is it
   set?" test, `WYO_WHISPER_DEBUG=false` really does mean off.
 - **`--data-dir`**, which can be repeated, splits on `:` —
   `WYO_WHISPER_DATA_DIR=/data:/media/models`. Passing any `--data-dir` on the
   command line replaces the list rather than adding to it.
-- **`--vad-clip`**, which takes any number of values, splits on commas or
-  spaces. Empty means the flag with no values, i.e. every library.
 - **`--zeroconf`**, whose value is optional, takes the name to announce, or
   empty for the default name.
 
@@ -484,3 +361,22 @@ secrets:
 In the Docker image, `--uri`, `--data-dir`, and `--device` have defaults baked
 into the entrypoint; those are dropped when the matching variable is set, so
 `WYO_WHISPER_URI` and friends work there too.
+
+## Development
+
+The server is a Python package, `wyoming_vulkan_whisper`.
+For tests and linting, a virtual environment with the CPU-only pywhispercpp
+wheel from PyPI is enough:
+
+``` sh
+script/setup --dev --hass
+script/lint
+script/test
+```
+
+`script/run --uri tcp://0.0.0.0:10300 --data-dir ./local` starts the server on
+the CPU. For Vulkan outside Docker, build pywhispercpp from source with
+`GGML_VULKAN=1 pip install --no-binary pywhispercpp pywhispercpp` (needs
+`glslc`, the Vulkan and SPIR-V headers, and a compiler); `Dockerfile.vulkan`
+does the same from a git checkout, with a newer whisper.cpp than the one
+pywhispercpp bundles.

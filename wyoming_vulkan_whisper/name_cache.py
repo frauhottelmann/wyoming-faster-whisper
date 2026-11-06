@@ -112,8 +112,8 @@ class HassNameCache:
     ) -> Optional[str]:
         """The prompt for this utterance: configured prefix plus current names.
 
-        ``wait`` is False on the streaming path, where the prompt is needed at
-        the start of the audio and there is nothing to wait for yet.
+        With ``wait`` False, the names already on hand are used without waiting
+        for a refresh that is still running.
         """
         if wait:
             await self.wait_for_refresh()

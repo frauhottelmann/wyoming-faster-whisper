@@ -1,10 +1,9 @@
 """Code for Whisper transcription using whisper.cpp (via pywhispercpp).
 
-whisper.cpp is the one Whisper runtime here with a Vulkan backend, which is what
-makes it worth having next to faster-whisper: it reaches AMD and Intel GPUs -
-including APU iGPUs that ROCm does not support - with nothing but the Mesa
-driver. Built without Vulkan (the PyPI wheels) it runs on the CPU, so the same
-code serves both.
+whisper.cpp's Vulkan backend reaches AMD and Intel GPUs - including APU iGPUs
+that ROCm does not support - with nothing but the Mesa driver. Built without
+Vulkan (the PyPI wheels, used by the tests) it runs on the CPU, so the same code
+serves both.
 """
 
 import logging
@@ -40,8 +39,7 @@ def resolve_ggml_model(
     file in any other HuggingFace repository.
 
     Downloads go through huggingface_hub rather than pywhispercpp's own
-    downloader, so the files land in the same cache as every other backend's,
-    and a cache miss under local_files_only raises an OSError
+    downloader, so the files land in the --download-dir cache, and a cache miss under local_files_only raises an OSError
     (LocalEntryNotFoundError) - which is what the loader's cache-first retry
     expects.
     """

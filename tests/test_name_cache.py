@@ -14,10 +14,10 @@ pytest.importorskip("aiohttp")
 # pylint: disable=wrong-import-position
 from wyoming.info import Info  # noqa: E402
 
-from wyoming_faster_whisper.dispatch_handler import DispatchEventHandler  # noqa: E402
-from wyoming_faster_whisper.hass_api import HomeAssistantError  # noqa: E402
-from wyoming_faster_whisper.name_cache import HassNameCache  # noqa: E402
-from wyoming_faster_whisper.vocabulary import RecognitionContext  # noqa: E402
+from wyoming_vulkan_whisper.dispatch_handler import DispatchEventHandler  # noqa: E402
+from wyoming_vulkan_whisper.hass_api import HomeAssistantError  # noqa: E402
+from wyoming_vulkan_whisper.name_cache import HassNameCache  # noqa: E402
+from wyoming_vulkan_whisper.vocabulary import RecognitionContext  # noqa: E402
 
 
 class FakeHass:
@@ -166,7 +166,7 @@ async def test_a_refresh_that_timed_out_is_not_cancelled():
     assert await cache.initial_prompt(wait=False) == "Ecobee, Nanit."
 
 
-async def test_streaming_path_does_not_wait():
+async def test_without_waiting_the_names_on_hand_are_used():
     hass = FakeHass(_names("Ecobee"), delay=5.0)
     cache = _cache(hass, prefix="Vocabulary:")
     cache.schedule_refresh()

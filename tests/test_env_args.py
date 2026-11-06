@@ -7,9 +7,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pytest
 
-from wyoming_faster_whisper.__main__ import get_parser
-from wyoming_faster_whisper.const import SttLibrary
-from wyoming_faster_whisper.env_args import parse_args
+from wyoming_vulkan_whisper.__main__ import get_parser
+from wyoming_vulkan_whisper.env_args import parse_args
 
 # Enough to satisfy the required options when the test is about something else.
 BASE_ARGS = ["--uri", "tcp://0.0.0.0:10300", "--data-dir", "/data"]
@@ -57,11 +56,11 @@ def test_type_conversion() -> None:
     """Values go through the option's own type."""
     args = run(
         WYO_WHISPER_BEAM_SIZE="3",
-        WYO_WHISPER_VAD_THRESHOLD="0.25",
+        WYO_WHISPER_VAD_CLIP_THRESHOLD="0.25",
         WYO_WHISPER_VAD_ENDPOINTING="0.7",
     )
     assert args.beam_size == 3
-    assert args.vad_threshold == 0.25
+    assert args.vad_clip_threshold == 0.25
     assert args.vad_endpointing == 0.7
 
 
@@ -95,9 +94,9 @@ def test_flag_false(value: str) -> None:
 def test_flag_invalid(capsys: pytest.CaptureFixture) -> None:
     """A flag set to something that is neither is an error."""
     with pytest.raises(SystemExit):
-        run(WYO_WHISPER_VAD_FILTER="maybe")
+        run(WYO_WHISPER_VAD_CLIP="maybe")
 
-    assert "WYO_WHISPER_VAD_FILTER" in capsys.readouterr().err
+    assert "WYO_WHISPER_VAD_CLIP" in capsys.readouterr().err
 
 
 def test_append_arg() -> None:
@@ -157,33 +156,39 @@ def test_empty_secret_file_is_unset(tmp_path: Path) -> None:
     assert run(WYO_WHISPER_HASS_TOKEN_FILE=str(token_path)).hass_token is None
 
 
+def _list_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--items", nargs="*")
+    return parser
+
+
 def test_list_arg() -> None:
     """An option taking several values splits on commas or spaces."""
-    args = run(WYO_WHISPER_VAD_CLIP="qwen3-asr, sherpa")
-    assert args.vad_clip == ["qwen3-asr", "sherpa"]
+    args = parse_args(_list_parser(), [], environ={"WYO_WHISPER_ITEMS": "a, b c"})
+    assert args.items == ["a", "b", "c"]
 
 
 def test_list_arg_empty() -> None:
-    """An empty value means the flag with no values (every library)."""
-    args = run(WYO_WHISPER_VAD_CLIP="")
-    assert args.vad_clip == []
+    """An empty value means the flag with no values."""
+    args = parse_args(_list_parser(), [], environ={"WYO_WHISPER_ITEMS": ""})
+    assert args.items == []
 
 
 def test_optional_value_arg() -> None:
     """An option with an optional value takes its constant when empty."""
-    assert run(WYO_WHISPER_ZEROCONF="").zeroconf == "faster-whisper"
+    assert run(WYO_WHISPER_ZEROCONF="").zeroconf == "vulkan-whisper"
     assert run(WYO_WHISPER_ZEROCONF="kitchen").zeroconf == "kitchen"
 
 
 def test_choices_checked(capsys: pytest.CaptureFixture) -> None:
     """A value outside the option's choices is an error."""
     with pytest.raises(SystemExit):
-        run(WYO_WHISPER_STT_LIBRARY="not-a-library")
+        run(WYO_WHISPER_WHISPER_TASK="not-a-task")
 
-    assert "WYO_WHISPER_STT_LIBRARY" in capsys.readouterr().err
+    assert "WYO_WHISPER_WHISPER_TASK" in capsys.readouterr().err
 
-    args = run(WYO_WHISPER_STT_LIBRARY="sherpa")
-    assert SttLibrary(args.stt_library) == SttLibrary.SHERPA
+    args = run(WYO_WHISPER_WHISPER_TASK="translate")
+    assert args.whisper_task == "translate"
 
 
 def test_secret_file(tmp_path: Path) -> None:

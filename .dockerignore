@@ -1,4 +1,4 @@
 *
-!wyoming_faster_whisper/*.py
+!wyoming_vulkan_whisper/*.py
 !pyproject.toml
 !docker_run.sh

@@ -6,7 +6,7 @@ import os
 import tempfile
 import time
 import wave
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioChunkConverter, AudioStart, AudioStop
@@ -14,7 +14,7 @@ from wyoming.event import Event
 from wyoming.info import Describe, Info
 from wyoming.server import AsyncEventHandler
 
-from .const import AUTO_LANGUAGE, StreamingSession, Transcriber
+from .const import AUTO_LANGUAGE, Transcriber
 from .endpointing import SileroEndpointDetector
 from .models import ModelLoader
 from .vad import clip_wav_to_speech
@@ -28,7 +28,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class DispatchEventHandler(AsyncEventHandler):
-    """Dispatches to appropriate transcriber."""
+    """Collects a client's audio and answers with its transcript."""
 
     def __init__(
         self,
@@ -61,14 +61,7 @@ class DispatchEventHandler(AsyncEventHandler):
 
         self._audio_converter = AudioChunkConverter(rate=16000, width=2, channels=1)
 
-        # Streaming state.
-        # _is_streaming is None until the transcriber is loaded and the path
-        # (streaming vs batch) is decided. Audio that arrives before then is
-        # buffered in _pending_audio.
         self._got_audio = False
-        self._is_streaming: Optional[bool] = None
-        self._session: Optional[StreamingSession] = None
-        self._pending_audio: List[bytes] = []
 
         # Whether this utterance already asked for a name refresh.
         self._refreshed_names = False
@@ -103,23 +96,9 @@ class DispatchEventHandler(AsyncEventHandler):
                     self._loader.load_transcriber(self._language)
                 )
 
-            # Promote the background-loaded transcriber without blocking.
-            self._resolve_transcriber()
-
-            # Decide between streaming and batch once the transcriber is ready.
-            if (self._is_streaming is None) and (self._transcriber is not None):
-                await self._commit_path()
-
-            if self._is_streaming:
-                assert self._session is not None
-                await asyncio.to_thread(self._session.accept_chunk, chunk.audio)
-            elif self._is_streaming is False:
-                self._ensure_wav_file()
-                assert self._wav_file is not None
-                self._wav_file.writeframes(chunk.audio)
-            else:
-                # Transcriber not ready yet: buffer until the path is known.
-                self._pending_audio.append(chunk.audio)
+            self._ensure_wav_file()
+            assert self._wav_file is not None
+            self._wav_file.writeframes(chunk.audio)
 
             if self._vad_endpointing is not None:
                 if self._endpoint_detector is None:
@@ -185,41 +164,29 @@ class DispatchEventHandler(AsyncEventHandler):
                 return
             self._transcriber = await self._transcriber_future
 
-        # If audio arrived before the transcriber was ready, the path may
-        # still be undecided — commit it now using the buffered audio.
-        if self._is_streaming is None:
-            await self._commit_path()
+        assert self._wav_file is not None
+        self._wav_file.close()
+        self._wav_file = None
 
-        if self._is_streaming:
-            assert self._session is not None
-            text = await asyncio.to_thread(self._session.finish)
-        else:
-            assert self._wav_file is not None
-            self._wav_file.close()
-            self._wav_file = None
+        # With --vad-clip, trim leading/trailing silence before transcription.
+        wav_path = self._wav_path
+        if self._loader.vad_clip and await asyncio.to_thread(
+            clip_wav_to_speech,
+            self._wav_path,
+            self._clipped_wav_path,
+            self._loader.vad_clip_threshold,
+            self._loader.vad_clip_pad_ms,
+        ):
+            wav_path = self._clipped_wav_path
 
-            # Optionally clip leading/trailing silence before transcription.
-            # This operates on the WAV, so any batch transcriber can use it;
-            # --vad-clip decides which libraries actually do. Streaming
-            # transcribers never reach this path.
-            wav_path = self._wav_path
-            if self._loader.should_vad_clip(self._language) and await asyncio.to_thread(
-                clip_wav_to_speech,
-                self._wav_path,
-                self._clipped_wav_path,
-                self._loader.vad_clip_threshold,
-                self._loader.vad_clip_pad_ms,
-            ):
-                wav_path = self._clipped_wav_path
-
-            # Do transcription in a separate thread
-            text = await asyncio.to_thread(
-                self._transcriber.transcribe,
-                wav_path,
-                self._language,
-                beam_size=self._loader.beam_size,
-                initial_prompt=await self._initial_prompt(),
-            )
+        # Do transcription in a separate thread
+        text = await asyncio.to_thread(
+            self._transcriber.transcribe,
+            wav_path,
+            self._language,
+            beam_size=self._loader.beam_size,
+            initial_prompt=await self._initial_prompt(),
+        )
 
         end_time = time.monotonic()
         _LOGGER.info(text)
@@ -249,7 +216,7 @@ class DispatchEventHandler(AsyncEventHandler):
         self._refreshed_names = True
         self._names.schedule_refresh()
 
-    async def _initial_prompt(self, wait: bool = True) -> Optional[str]:
+    async def _initial_prompt(self) -> Optional[str]:
         """The prompt to bias this utterance with.
 
         Without --hass-token this is just the configured --initial-prompt; with
@@ -258,47 +225,12 @@ class DispatchEventHandler(AsyncEventHandler):
         if self._names is None:
             return self._loader.initial_prompt
 
-        prompt = await self._names.initial_prompt(self._transcriber, wait=wait)
+        prompt = await self._names.initial_prompt(self._transcriber)
         _LOGGER.debug("Initial prompt: %s", prompt)
         return prompt
 
-    def _resolve_transcriber(self) -> None:
-        """Promote the background-loaded transcriber if it's ready (no blocking)."""
-        if self._transcriber is not None:
-            return
-
-        future = self._transcriber_future
-        if (future is not None) and future.done() and (future.exception() is None):
-            self._transcriber = future.result()
-
-    async def _commit_path(self) -> None:
-        """Decide streaming vs batch and flush any buffered audio accordingly."""
-        assert self._transcriber is not None
-
-        self._is_streaming = self._transcriber.supports_streaming
-        if self._is_streaming:
-            self._session = self._transcriber.start_stream(
-                self._language,
-                beam_size=self._loader.beam_size,
-                # A streaming session needs its prompt before the audio ends, so
-                # there is nothing to wait for: use the names already on hand.
-                initial_prompt=await self._initial_prompt(wait=False),
-            )
-            if self._pending_audio:
-                # Replay audio buffered before the transcriber was ready.
-                replay = b"".join(self._pending_audio)
-                self._pending_audio.clear()
-                await asyncio.to_thread(self._session.accept_chunk, replay)
-        else:
-            # Batch path: flush buffered audio to the WAV file.
-            self._ensure_wav_file()
-            assert self._wav_file is not None
-            for buffered in self._pending_audio:
-                self._wav_file.writeframes(buffered)
-            self._pending_audio.clear()
-
     def _ensure_wav_file(self) -> None:
-        """Open the temp WAV file for batch transcription if not already open."""
+        """Open the temp WAV file if not already open."""
         if self._wav_file is None:
             self._wav_file = wave.open(self._wav_path, "wb")
             # Audio is normalized to this format by the converter.
@@ -317,7 +249,4 @@ class DispatchEventHandler(AsyncEventHandler):
         self._transcriber_future = None
         self._finished = False
         self._got_audio = False
-        self._is_streaming = None
-        self._session = None
-        self._pending_audio = []
         self._refreshed_names = False

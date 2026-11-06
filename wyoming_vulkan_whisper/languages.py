@@ -1,32 +1,28 @@
-"""Whisper's language codes, and normalizing a client's code onto them.
-
-Shared by the two backends that run Whisper checkpoints (faster-whisper and
-transformers), which both reject an unknown code by raising rather than falling
-back. faster-whisper is a hard dependency, so importing it here is always safe --
-unlike every other backend, which is an optional extra.
-"""
+"""Whisper's language codes, and normalizing a client's code onto them."""
 
 import logging
 from typing import Optional
-
-import faster_whisper
 
 from .const import base_language
 
 _LOGGER = logging.getLogger(__name__)
 
+# The language tokens of the multilingual Whisper checkpoints (large-v3 added
+# "yue"), in Whisper's own order. Kept here rather than asked of whisper.cpp so
+# the list is available without loading its native library.
 WHISPER_LANGUAGES = frozenset(
-    faster_whisper.tokenizer._LANGUAGE_CODES  # pylint: disable=protected-access
+    (
+        "en zh de es ru ko fr ja pt tr pl ca nl ar sv it id hi fi vi he uk el ms "
+        "cs ro da hu ta no th ur hr bg lt la mi ml cy sk te fa lv bn sr az sl kn "
+        "et mk br eu is hy ne mn bs kk sq sw gl mr pa si km sn yo so af oc ka be "
+        "tg sd gu am yi lo uz fo ht ps tk nn mt sa lb my bo tl mg as tt haw ln "
+        "ha ba jw su yue"
+    ).split()
 )
 
 
 def whisper_language(language: Optional[str]) -> Optional[str]:
     """Normalize a client's language code to one Whisper knows, else None.
-
-    Both Whisper backends raise for anything outside the code list --
-    faster-whisper a ValueError from its Tokenizer, transformers a ValueError
-    from set_prefix_tokens, deferred until generate() -- which fails the whole
-    transcription.
 
     Home Assistant normally sends back one of the codes we advertised, but it
     falls through to the raw pipeline language when its matcher finds nothing
