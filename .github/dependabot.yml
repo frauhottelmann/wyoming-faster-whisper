@@ -1,0 +1,34 @@
+# Dependabot opens pull requests for outdated dependencies once a week.
+# Related updates are grouped so each ecosystem produces at most one PR per run.
+version: 2
+updates:
+  # Python dependencies from pyproject.toml.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python:
+        patterns:
+          - "*"
+
+  # Actions used in .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Base image of Dockerfile.vulkan (ubuntu).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Stay on LTS releases: skip interim releases such as 26.10, which
+      # Dependabot sees as minor bumps of 26.04.
+      - dependency-name: "ubuntu"
+        update-types: ["version-update:semver-minor"]
