@@ -93,8 +93,8 @@ qwen3_asr = [
 # so these have to be separate extras rather than an add-on to the ones above.
 #
 # These are not sufficient on their own: faster-whisper requires onnxruntime, so
-# the CPU package still arrives and, installed second, clobbers the GPU one. See
-# Dockerfile.gpu for the reconciliation step.
+# the CPU package still arrives and, installed second, clobbers the GPU one:
+# uninstall both and reinstall onnxruntime-gpu last.
 onnx_asr_gpu = [
     "onnx-asr[gpu,hub]==0.11.0",
 ]
