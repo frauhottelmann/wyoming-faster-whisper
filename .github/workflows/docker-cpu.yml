@@ -1,0 +1,90 @@
+---
+# Builds the CPU image (./Dockerfile) and checks that it transcribes with
+# faster-whisper. Nothing is pushed: the release workflow publishes this image.
+#
+# Only amd64 is built here; the arm64 half of the release build goes through
+# QEMU and would take the better part of an hour. The base image, torch, and
+# the Python packages are the same on both, so amd64 catches what a dependency
+# update is likely to break.
+name: Docker (CPU)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - docker_run.sh
+      - pyproject.toml
+      - wyoming_faster_whisper/**
+      - .github/workflows/docker-cpu.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Outside the checkout, for the same reason as in the Vulkan workflow.
+  DATA_DIR: ${{ github.workspace }}/../whisper-data
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: wyoming-whisper:test
+          cache-from: type=gha,scope=cpu
+          cache-to: type=gha,mode=max,scope=cpu
+
+      - name: Cache models
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.DATA_DIR }}
+          key: cpu-models-base-int8
+
+      - name: Start container
+        run: |
+          mkdir -p "$DATA_DIR"
+          docker run -d --name whisper -p 10300:10300 \
+            --user "$(id -u):$(id -g)" \
+            -v "$DATA_DIR:/data" \
+            wyoming-whisper:test \
+            --model base-int8 --language en
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Smoke test
+        run: |
+          pip install 'wyoming>=1.10.2,<2'
+          python3 script/smoke_test --uri tcp://127.0.0.1:10300 \
+            --wav tests/turn_on_the_living_room_lamp.wav \
+            --expect "turn on the living room lamp"
+
+      - name: Check health
+        run: |
+          for i in $(seq 1 30); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' whisper)"
+            echo "health: $status"
+            [ "$status" = healthy ] && exit 0
+            sleep 5
+          done
+          exit 1
+
+      - name: Container log
+        if: always()
+        run: docker logs whisper 2>&1 | tail -100 || true

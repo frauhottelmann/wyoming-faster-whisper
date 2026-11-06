@@ -1,6 +1,10 @@
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 ARG TARGETARCH
 ARG TARGETVARIANT
+
+# Kept in step with Dockerfile.gpu, which is held at the last torch release
+# that still has a CUDA 12 build.
+ARG TORCH_VERSION=2.14.1
 
 # Install faster-whisper
 WORKDIR /usr/src
@@ -19,7 +23,7 @@ RUN \
         wheel \
     && .venv/bin/pip3 install --no-cache-dir \
         --extra-index-url 'https://download.pytorch.org/whl/cpu' \
-        'torch==2.6.0' \
+        "torch==${TORCH_VERSION}" \
     \
     && .venv/bin/pip3 install --no-cache-dir \
         --extra-index-url https://www.piwheels.org/simple \

@@ -16,7 +16,7 @@
 # The base supplies cuBLAS, NVRTC, and cuDNN 9, which CTranslate2 4.x,
 # onnxruntime-gpu, and the sherpa-onnx CUDA build all link against. Run with
 # `--gpus all` and the NVIDIA Container Toolkit installed on the host.
-FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+FROM nvidia/cuda:12.9.2-cudnn-runtime-ubuntu24.04
 
 # sherpa-onnx stays on the CPU wheel here, deliberately. A CUDA sherpa-onnx
 # build exists (the "+cuda12.cudnn9" wheels on the k2-fsa index), but sherpa-onnx
@@ -34,6 +34,10 @@ FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 # libcublasLt.so.13 and quietly drops back to the CPU provider on this base.
 ARG ONNXRUNTIME_GPU_VERSION=">=1.19,<1.27"
 
+# torch 2.14 is the last release with a CUDA 12 build (cu126); 2.15 ships for
+# CUDA 13 only. Keep this in step with the CPU image.
+ARG TORCH_VERSION=2.14.1
+
 WORKDIR /usr/src
 
 COPY ./pyproject.toml ./
@@ -50,7 +54,7 @@ RUN \
         wheel \
     && .venv/bin/pip3 install --no-cache-dir \
         --extra-index-url 'https://download.pytorch.org/whl/cu126' \
-        'torch==2.6.0' \
+        "torch==${TORCH_VERSION}" \
     \
     # Note the -gpu extras: they pull onnxruntime-gpu instead of onnxruntime.
     && .venv/bin/pip3 install --no-cache-dir \
