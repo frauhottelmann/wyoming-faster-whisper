@@ -25,11 +25,9 @@ jobs:
         with:
           python-version: "3.13"
 
-      # Every optional backend that pylint/mypy need to see is installed, so
-      # their imports resolve.
       - name: Install
         run: |
-          script/setup --dev --qwen3-asr --hass --whisper-cpp
+          script/setup --dev --hass
 
       - name: Lint
         run: script/lint
@@ -61,12 +59,11 @@ jobs:
           key: models-${{ hashFiles('tests/test_*.py') }}
           restore-keys: models-
 
-      # --whisper-cpp installs the CPU pywhispercpp wheel, so the whisper-cpp
-      # backend runs end to end here too; its Vulkan build is covered by the
-      # Docker workflow.
+      # This installs the CPU pywhispercpp wheel, so whisper.cpp runs end to end
+      # here on the CPU; its Vulkan build is covered by the Docker workflow.
       - name: Install
         run: |
-          script/setup --dev --transformers --qwen3-asr --hass --whisper-cpp
+          script/setup --dev --hass
 
       - name: Run tests
         run: script/test

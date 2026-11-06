@@ -7,9 +7,8 @@ refresh, AudioStop waits for it, and the resulting prompt reaches
 """
 
 import asyncio
-import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Union
 
 import pytest
 
@@ -21,44 +20,21 @@ from wyoming.audio import AudioChunk, AudioStart, AudioStop  # noqa: E402
 from wyoming.info import Info  # noqa: E402
 
 from wyoming_faster_whisper.const import (  # noqa: E402
-    StreamingSession,
-    SttLibrary,
     Transcriber,
 )
 from wyoming_faster_whisper.dispatch_handler import DispatchEventHandler  # noqa: E402
 from wyoming_faster_whisper.hass_api import HomeAssistantError  # noqa: E402
-from wyoming_faster_whisper.models import vad_clip_enabled  # noqa: E402
 from wyoming_faster_whisper.name_cache import HassNameCache  # noqa: E402
 from wyoming_faster_whisper.vocabulary import RecognitionContext  # noqa: E402
 
 RATE = 16000
 
 
-class FakeSession(StreamingSession):
-    """Records the prompt its stream was opened with."""
-
-    def __init__(self, initial_prompt: Optional[str]) -> None:
-        self.initial_prompt = initial_prompt
-        self.chunks: List[bytes] = []
-
-    def accept_chunk(self, audio_bytes: bytes) -> None:
-        self.chunks.append(audio_bytes)
-
-    def finish(self) -> str:
-        return "streamed transcript"
-
-
 class FakeTranscriber(Transcriber):
     """Captures every call, and can pretend to have (or lack) a tokenizer."""
 
-    def __init__(
-        self,
-        streaming: bool = False,
-        tokens_per_word: Optional[int] = None,
-    ) -> None:
+    def __init__(self, tokens_per_word: Optional[int] = None) -> None:
         self.calls: List[Dict[str, Any]] = []
-        self.sessions: List[FakeSession] = []
-        self._streaming = streaming
         self._tokens_per_word = tokens_per_word
 
     def transcribe(
@@ -86,20 +62,6 @@ class FakeTranscriber(Transcriber):
         return len(text.split()) * self._tokens_per_word
 
     @property
-    def supports_streaming(self) -> bool:
-        return self._streaming
-
-    def start_stream(
-        self,
-        language: Optional[str] = None,
-        beam_size: int = 5,
-        initial_prompt: Optional[str] = None,
-    ) -> StreamingSession:
-        session = FakeSession(initial_prompt)
-        self.sessions.append(session)
-        return session
-
-    @property
     def prompt(self) -> Optional[str]:
         """The prompt from the last transcribe() call."""
         assert self.calls, "transcribe() was never called"
@@ -119,17 +81,9 @@ class FakeLoader:
         self.vad_clip = False
         self.vad_clip_threshold = 0.5
         self.vad_clip_pad_ms = 400
-        self.vad_clip_libraries: Optional[Set[SttLibrary]] = None
-        self.stt_library = SttLibrary.QWEN3_ASR
 
     async def load_transcriber(self, language: Optional[str] = None) -> Transcriber:
         return self.transcriber
-
-    def should_vad_clip(self, language: Optional[str] = None) -> bool:
-        # Defer to the real predicate so the fake cannot drift from production.
-        return vad_clip_enabled(
-            self.stt_library, self.vad_clip, self.vad_clip_libraries
-        )
 
 
 class FakeHass:
@@ -423,70 +377,34 @@ async def test_vad_endpointing_sends_one_transcript_before_audio_stop():
     assert len(transcriber.calls) == 1
 
 
-# --- streaming path ------------------------------------------------------
+# --- --vad-clip ------------------------------------------------------------
 
 
-async def test_a_streaming_session_gets_the_names_already_on_hand():
-    hass = FakeHass(_names("Ecobee"))
-    cache = _cache(hass)
-    await cache.refresh()
-
-    transcriber = FakeTranscriber(streaming=True)
-    handler = _handler(transcriber, names=cache)
-
-    await _utterance(handler)
-
-    assert transcriber.sessions
-    assert transcriber.sessions[0].initial_prompt == "Ecobee."
-    assert handler.transcript == "streamed transcript"
-
-
-async def test_a_streaming_session_does_not_wait_for_a_slow_fetch():
-    # The prompt is needed at the start of the audio, so there is nothing to
-    # wait for: the session opens with the prefix alone, immediately.
-    #
-    # The timing assert is the real check. Waiting would still end up with
-    # "Vocabulary:" once the timeout expired, so only elapsed time distinguishes
-    # "did not wait" from "waited and gave up".
-    hass = FakeHass(_names("Ecobee"), delay=30.0)
-    transcriber = FakeTranscriber(streaming=True)
-    handler = _handler(
-        transcriber,
-        names=_cache(hass, prefix="Vocabulary:", wait_timeout=30.0),
-        initial_prompt="Vocabulary:",
-    )
-
-    start = time.monotonic()
-    await _utterance(handler)
-    elapsed = time.monotonic() - start
-
-    assert transcriber.sessions[0].initial_prompt == "Vocabulary:"
-    assert elapsed < 1.0, f"streaming start blocked for {elapsed:.1f}s"
-
-
-# --- --vad-clip library selection -----------------------------------------
-
-
-async def test_clipping_is_skipped_for_a_library_that_was_not_named():
-    """`--vad-clip qwen3-asr` must not clip for other backends."""
+async def test_clipping_is_skipped_without_vad_clip():
     transcriber = FakeTranscriber()
     handler = _handler(transcriber)
-    handler._loader.vad_clip = True
-    handler._loader.vad_clip_libraries = {SttLibrary.QWEN3_ASR}
-    handler._loader.stt_library = SttLibrary.FASTER_WHISPER
 
-    await _utterance(handler)
+    clipped: List[str] = []
+
+    def fake_clip(src, dst, threshold, pad_ms) -> bool:
+        clipped.append(str(src))
+        return True
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            "wyoming_faster_whisper.dispatch_handler.clip_wav_to_speech", fake_clip
+        )
+        await _utterance(handler)
 
     # The untouched recording is transcribed, not the clipped copy.
+    assert not clipped
     assert transcriber.calls[-1]["wav_path"] == handler._wav_path
 
 
-async def test_clipping_is_attempted_for_a_named_library():
+async def test_clipping_is_attempted_with_vad_clip():
     transcriber = FakeTranscriber()
     handler = _handler(transcriber)
     handler._loader.vad_clip = True
-    handler._loader.vad_clip_libraries = {SttLibrary.QWEN3_ASR}
-    handler._loader.stt_library = SttLibrary.QWEN3_ASR
 
     clipped: List[str] = []
 

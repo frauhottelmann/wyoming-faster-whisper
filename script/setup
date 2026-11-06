@@ -11,21 +11,10 @@ _VENV_DIR = _PROGRAM_DIR / ".venv"
 parser = argparse.ArgumentParser()
 parser.add_argument("--dev", action="store_true", help="Install dev requirements")
 parser.add_argument(
-    "--transformers", action="store_true", help="Install transformers requirements"
-)
-parser.add_argument("--sherpa", action="store_true", help="Install sherpa requirements")
-parser.add_argument("--funasr", action="store_true", help="Install funasr requirements")
-parser.add_argument(
-    "--onnx-asr", action="store_true", help="Install onnx-asr requirements"
-)
-parser.add_argument(
-    "--qwen3-asr", action="store_true", help="Install qwen3-asr requirements"
-)
-parser.add_argument(
     "--hass", action="store_true", help="Install Home Assistant requirements"
 )
 parser.add_argument(
-    "--whisper-cpp", action="store_true", help="Install whisper.cpp requirements"
+    "--zeroconf", action="store_true", help="Install zeroconf requirements"
 )
 args = parser.parse_args()
 
@@ -43,30 +32,16 @@ extras = []
 if args.dev:
     extras.append("dev")
 
-if args.transformers:
-    extras.append("transformers")
-
-if args.sherpa:
-    extras.append("sherpa")
-
-if args.funasr:
-    extras.append("funasr")
-
-if args.onnx_asr:
-    extras.append("onnx_asr")
-
-if args.qwen3_asr:
-    extras.append("qwen3_asr")
-
 if args.hass:
     extras.append("hass")
 
-if args.whisper_cpp:
-    extras.append("whisper_cpp")
+if args.zeroconf:
+    extras.append("zeroconf")
 
 extras_str = ""
 if extras:
     extras_str = "[" + ",".join(extras) + "]"
 
-# Install requirements
+# Install requirements. pywhispercpp from PyPI runs on the CPU only; see
+# Dockerfile.vulkan for the Vulkan build.
 subprocess.check_call(pip + ["install", "-e", f"{_PROGRAM_DIR}{extras_str}"])

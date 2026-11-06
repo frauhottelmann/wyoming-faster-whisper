@@ -1,7 +1,10 @@
-"""Tests for faster-whisper."""
+"""End-to-end test: run the server and transcribe a recording through it.
+
+Uses the CPU pywhispercpp wheel from PyPI; the Vulkan build is covered by the
+Docker workflow's smoke test.
+"""
 
 import asyncio
-import importlib.util
 import re
 import sys
 import wave
@@ -16,61 +19,23 @@ from wyoming.info import Describe, Info
 from . import _DIR, _LOCAL_DIR, _SAMPLES_PER_CHUNK, _START_TIMEOUT, _TRANSCRIBE_TIMEOUT
 
 
-def _needs(module: str):
-    """Skip a param when the backend's package isn't installed (e.g. funasr in CI)."""
-    return pytest.mark.skipif(
-        importlib.util.find_spec(module) is None,
-        reason=f"{module} not installed",
-    )
-
-
-@pytest.mark.parametrize(
-    ("stt_library", "model", "extra_args"),
-    [
-        ("faster-whisper", "base-int8", []),
-        ("faster-whisper", "base-int8", ["--vad-clip"]),
-        pytest.param(
-            "transformers", "openai/whisper-base.en", [], marks=_needs("transformers")
-        ),
-        pytest.param("sherpa", "auto", [], marks=_needs("sherpa_onnx")),
-        # --vad-clip is backend-agnostic (clips the WAV before dispatch), so it
-        # must work for non-faster-whisper batch backends too.
-        pytest.param("sherpa", "auto", ["--vad-clip"], marks=_needs("sherpa_onnx")),
-        pytest.param(
-            "sherpa", "auto", ["--sherpa-streaming"], marks=_needs("sherpa_onnx")
-        ),
-        pytest.param("whisper-cpp", "base", [], marks=_needs("pywhispercpp")),
-        pytest.param(
-            "whisper-cpp", "base", ["--vad-clip"], marks=_needs("pywhispercpp")
-        ),
-        pytest.param(
-            "funasr", "FunAudioLLM/SenseVoiceSmall", [], marks=_needs("funasr")
-        ),
-        pytest.param(
-            "funasr",
-            "FunAudioLLM/SenseVoiceSmall",
-            ["--vad-clip"],
-            marks=_needs("funasr"),
-        ),
-    ],
-)
+@pytest.mark.parametrize("extra_args", [[], ["--vad-clip"]])
 @pytest.mark.asyncio
-async def test_faster_whisper(stt_library: str, model: str, extra_args: list) -> None:
+async def test_transcribe(extra_args: list) -> None:
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
         "wyoming_faster_whisper",
         "--uri",
         "stdio://",
-        "--stt-library",
-        stt_library,
         "--model",
-        model,
+        "base",
+        "--device",
+        "cpu",
         "--data-dir",
         str(_LOCAL_DIR),
         "--language",
         "en",
-        "--vad-filter",
         *extra_args,
         stdin=PIPE,
         stdout=PIPE,

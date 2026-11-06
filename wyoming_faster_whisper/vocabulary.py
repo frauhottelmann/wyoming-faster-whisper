@@ -3,8 +3,7 @@
 Whisper accepts an ``initial_prompt`` that conditions the decoder, and biasing it
 toward the names in the user's home is the cheapest accuracy win available: it
 takes proper nouns the model has never heard ("Ecobee", "Nanit") from garbage to
-correct without changing model, audio, or decode settings. Qwen3-ASR takes the
-same string as its context prompt.
+correct without changing model, audio, or decode settings.
 
 The catch is size. Whisper's decoder context is 448 tokens and the prompt is
 hard-capped at ``max_length // 2 - 1`` == 223, past which it is silently

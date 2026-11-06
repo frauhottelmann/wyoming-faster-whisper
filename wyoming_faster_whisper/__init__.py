@@ -1,4 +1,4 @@
-"""Wyoming server for faster-whisper."""
+"""Wyoming server for Whisper on whisper.cpp, with its Vulkan backend."""
 
 from importlib.metadata import version
 

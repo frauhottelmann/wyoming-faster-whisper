@@ -1,7 +1,6 @@
 """Tests for normalizing client language codes onto Whisper's.
 
-Dependency-free: faster-whisper is a hard dependency, so the code list is always
-importable.
+Dependency-free: the code list does not need whisper.cpp loaded.
 """
 
 import pytest
@@ -16,8 +15,7 @@ from wyoming_faster_whisper.languages import WHISPER_LANGUAGES, whisper_language
         ("en", "en"),
         ("EN", "en"),
         # Home Assistant falls back to the raw pipeline language when its
-        # matcher finds nothing or a pipeline has no stt_language stored. Both
-        # Whisper backends raise ValueError for these, failing transcription.
+        # matcher finds nothing or a pipeline has no stt_language stored.
         ("pt-BR", "pt"),
         ("zh-CN", "zh"),
         ("de-CH", "de"),
@@ -25,7 +23,7 @@ from wyoming_faster_whisper.languages import WHISPER_LANGUAGES, whisper_language
         # Home Assistant languages Whisper has no token for -> auto-detect.
         ("ga", None),
         ("kw", None),
-        # Qwen3-ASR has Filipino; Whisper does not.
+        # Filipino has no Whisper token.
         ("fil", None),
         ("", None),
         (None, None),
